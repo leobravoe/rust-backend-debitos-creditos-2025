@@ -101,7 +101,7 @@ services:
     container_name: pgbouncer
     volumes:
       - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+      - ./pgbouncer/userlist.conf:/etc/pgbouncer/userlist.conf:ro
     ports:
       - "6432:6432"
     depends_on:
