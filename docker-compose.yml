@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres_api_db
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.80"
+          memory: "250MB"
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres_api_db" ]
+      interval: "10s"
+      timeout: "5s"
+      retries: "5"
+      start_period: "30s"
+
+  app1:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    container_name: app1
+    environment:
+      PORT: 3001
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: postgres_api_db
+      PG_MAX: 30
+      HOSTNAME: app1
+    expose:
+      - "3001"
+    depends_on:
+      - pgbouncer
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "100MB"
+    restart: unless-stopped
+
+  app2:
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    container_name: app2
+    environment:
+      PORT: 3002
+      DB_HOST: pgbouncer
+      DB_PORT: 6432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: postgres_api_db
+      PG_MAX: 30
+      HOSTNAME: app2
+    expose:
+      - "3002"
+    depends_on:
+      - pgbouncer
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "100MB"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - app1
+      - app2
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: "100MB"
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
