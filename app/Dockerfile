@@ -1,5 +1,5 @@
 # Stage 1: builder
-FROM --platform=linux/amd64 rust:latest AS builder
+FROM rust:latest AS builder
 WORKDIR /usr/src/app
 
 COPY app/Cargo.toml ./
@@ -10,7 +10,7 @@ COPY app/main.rs src/main.rs
 RUN cargo build --release
 
 # Stage 2: runtime
-FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 ARG BINARY_NAME=rust_api
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 

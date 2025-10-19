@@ -49,7 +49,7 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "100MB"
+          memory: "90MB"
     restart: unless-stopped
 
   app2:
@@ -76,7 +76,7 @@ services:
       resources:
         limits:
           cpus: "0.25"
-          memory: "100MB"
+          memory: "90MB"
     restart: unless-stopped
 
   nginx:
@@ -107,6 +107,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: "20MB"
     restart: unless-stopped
 
 volumes:
