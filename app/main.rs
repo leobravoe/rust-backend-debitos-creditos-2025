@@ -115,7 +115,7 @@ async fn main() {
     let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
     let db_password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
     let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "6432".to_string()); // Default para pgbouncer
+    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string()); // Default para pgbouncer
     let db_database = std::env::var("DB_DATABASE").unwrap_or_else(|_| "postgres_api_db".to_string());
     let pg_max_conns_str = std::env::var("PG_MAX").unwrap_or_else(|_| "30".to_string());
     let pg_max_conns = pg_max_conns_str.parse::<u32>().unwrap_or(30);

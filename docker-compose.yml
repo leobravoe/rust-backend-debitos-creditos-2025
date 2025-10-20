@@ -17,7 +17,7 @@ services:
           cpus: "0.80"
           memory: "250MB"
     ports:
-      - "5433:5432"
+      - "5432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -d postgres_api_db" ]
       interval: "10s"
@@ -34,8 +34,8 @@ services:
     container_name: app1
     environment:
       PORT: 3001
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
@@ -44,12 +44,12 @@ services:
     expose:
       - "3001"
     depends_on:
-      - pgbouncer
+      - postgres
     deploy:
       resources:
         limits:
           cpus: "0.25"
-          memory: "90MB"
+          memory: "100MB"
     restart: unless-stopped
 
   app2:
@@ -61,8 +61,8 @@ services:
     container_name: app2
     environment:
       PORT: 3002
-      DB_HOST: pgbouncer
-      DB_PORT: 6432
+      DB_HOST: postgres
+      DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
@@ -71,12 +71,12 @@ services:
     expose:
       - "3002"
     depends_on:
-      - pgbouncer
+      - postgres
     deploy:
       resources:
         limits:
           cpus: "0.25"
-          memory: "90MB"
+          memory: "100MB"
     restart: unless-stopped
 
   nginx:
@@ -94,24 +94,6 @@ services:
         limits:
           cpus: "0.2"
           memory: "100MB"
-    restart: unless-stopped
-
-  pgbouncer:
-    image: edoburu/pgbouncer:latest
-    container_name: pgbouncer
-    volumes:
-      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - ./pgbouncer/userlist.conf:/etc/pgbouncer/userlist.conf:ro
-    ports:
-      - "6432:6432"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.2"
-          memory: "20MB"
     restart: unless-stopped
 
 volumes:

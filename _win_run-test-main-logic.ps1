@@ -105,7 +105,7 @@ try {
     Run-CmdUTF8 -Title "docker-compose down -v" -CommandLine 'docker-compose down -v' -IgnoreExitCode
 
     WLog "`n[PASSO 2/5] Construindo e subindo novos containers (a ignorar falhas)..."
-    Run-CmdUTF8 -Title "docker-compose up -d --build" -CommandLine 'docker-compose --compatibility up -d --build' -IgnoreExitCode
+    Run-CmdUTF8 -Title "docker-compose up -d --build --force-recreate" -CommandLine 'docker-compose --compatibility up -d --build --force-recreate' -IgnoreExitCode
 
     WLog "`n[PASSO 3/5] Verificacao de Saude dos Containers..."
     $timeoutSeconds = 90
