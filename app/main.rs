@@ -119,35 +119,35 @@ async fn main() -> anyhow::Result<()> {
         db_user, db_password, db_host, db_port, db_database
     );
 
-    // Loop de retentativa reintroduzido para estabilidade na inicialização
+    // Loop de retentativa para esperar o banco (e o init.sql)
     tracing::info!("Tentando conectar à base de dados: {}", database_url);
     let pool_options = PgPoolOptions::new()
         .max_connections(pg_max_connections);
 
-    let mut retries = 10; // Tentar por até 30 segundos (10 * 3s)
+    let mut retries = 10;
     let pool = loop {
-        // Adicionado .clone() para evitar o erro E0382 (use of moved value)
+        // .clone() corrige o erro de "moved value"
         match pool_options.clone().connect(&database_url).await {
             Ok(p) => {
                 tracing::info!("Ligação à base de dados estabelecida com sucesso!");
-                break p; // Sai do loop com o pool
+                break p;
             }
             Err(e) => {
                 retries -= 1;
                 if retries == 0 {
-                    // Se esgotarem as tentativas, encerra a aplicação
                     tracing::error!("Falha ao conectar à base de dados após várias tentativas: {:?}", e);
-                    std::process::exit(1); // Encerra o processo com código de erro
+                    std::process::exit(1);
                 }
                 tracing::warn!(
                     "Falha ao conectar à base de dados [{} tentativas restantes], tentando novamente em 3s... (Erro: {})",
                     retries, e
                 );
-                sleep(Duration::from_secs(3)).await; // Espera assíncrona
+                sleep(Duration::from_secs(3)).await;
             }
         }
     };
     
+    // As migrações agora só rodam APÓS o healthcheck inteligente passar E a conexão ser estabelecida
     tracing::info!("Executando migrações (funções e índices)...");
     sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;
     sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;
@@ -159,14 +159,16 @@ async fn main() -> anyhow::Result<()> {
         pool: Arc::new(pool),
     };
 
-    // <-- CORREÇÃO: Sintaxe de rota atualizada de :id para {id}
+    // Sintaxe de rota com {id} (corrige o pânico do Axum)
     let app = Router::new()
         .route("/clientes/{id}/extrato", get(get_extrato))
         .route("/clientes/{id}/transacoes", post(post_transacao))
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or("8080".to_string());
+    let port_str = std::env::var("PORT").unwrap_or("8080".to_string());
+    let port = port_str.parse::<u16>()?; // Usar u16 para porta
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
+
 
     tracing::info!("Servidor ouvindo na porta {}", port);
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -220,22 +222,21 @@ async fn post_transacao(
         return (StatusCode::NOT_FOUND, Json(JsonValue::Null)).into_response();
     }
 
-    // Validação básica
     if payload.descricao.is_empty() || payload.descricao.len() > 10 {
         return (StatusCode::UNPROCESSABLE_ENTITY, Json(JsonValue::Null)).into_response();
     }
     if payload.tipo != "c" && payload.tipo != "d" {
          return (StatusCode::UNPROCESSABLE_ENTITY, Json(JsonValue::Null)).into_response();
     }
-    if payload.valor == 0 { // Adicionada validação para valor 0
+    if payload.valor == 0 {
         return (StatusCode::UNPROCESSABLE_ENTITY, Json(JsonValue::Null)).into_response();
     }
 
     match sqlx::query("SELECT process_transaction($1, $2, $3, $4) AS response_json")
         .bind(id)
-        .bind(payload.valor as i32) // p_amount
-        // Correção anterior (E0277) mantida
-        .bind(payload.tipo.chars().next().unwrap().to_string()) // p_type
+        .bind(payload.valor as i32)
+        // .to_string() corrige o erro de compilação E0277
+        .bind(payload.tipo.chars().next().unwrap().to_string())
         .bind(payload.descricao)
         .fetch_one(&*state.pool)
         .await

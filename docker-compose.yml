@@ -19,14 +19,13 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      # --- ESTA É A CORREÇÃO CRÍTICA ---
-      # Em vez de 'pg_isready', vamos tentar consultar a tabela 'accounts'.
-      # O 'psql' só retornará 0 (sucesso) se a tabela existir (ou seja, se o init.sql rodou).
+      # --- A CORREÇÃO ESTÁ AQUI ---
+      # Garante que o init.sql terminou de rodar antes de marcar como 'healthy'
       test: [ "CMD-SHELL", "psql -U postgres -d postgres_api_db -c 'SELECT 1 FROM accounts LIMIT 1'" ]
-      interval: "5s"    # Verificar mais rápido
+      interval: "5s"
       timeout: "5s"
-      retries: "10"   # Tentar mais vezes
-      start_period: "10s" # Esperar 10s antes de começar a checar
+      retries: "10"
+      start_period: "10s" # Dá 10s para o postgres iniciar antes de checar
 
   app1:
     build:
@@ -48,7 +47,7 @@ services:
       - "3001"
     depends_on:
       postgres:
-        condition: service_healthy # Agora espera o healthcheck inteligente
+        condition: service_healthy # Agora espera pelo healthcheck inteligente
     deploy:
       resources:
         limits:
@@ -76,7 +75,7 @@ services:
       - "3002"
     depends_on:
       postgres:
-        condition: service_healthy # Agora espera o healthcheck inteligente
+        condition: service_healthy # Agora espera pelo healthcheck inteligente
     deploy:
       resources:
         limits:
