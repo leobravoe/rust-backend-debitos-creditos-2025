@@ -19,7 +19,6 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      # --- A CORREÇÃO ESTÁ AQUI ---
       # Garante que o init.sql terminou de rodar antes de marcar como 'healthy'
       test: [ "CMD-SHELL", "psql -U postgres -d postgres_api_db -c 'SELECT 1 FROM accounts LIMIT 1'" ]
       interval: "5s"
@@ -47,7 +46,7 @@ services:
       - "3001"
     depends_on:
       postgres:
-        condition: service_healthy # Agora espera pelo healthcheck inteligente
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -75,7 +74,7 @@ services:
       - "3002"
     depends_on:
       postgres:
-        condition: service_healthy # Agora espera pelo healthcheck inteligente
+        condition: service_healthy
     deploy:
       resources:
         limits:
