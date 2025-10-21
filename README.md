@@ -1,4 +1,4 @@
-# Guia de Comandos — `rust-backend-debitos-creditos-2025`
+# Guia de Comandos — `rust-backend-debitos-creditos-rinha-2024`
 
 Este documento reúne comandos e procedimentos operacionais do repositório, com variações por sistema operacional quando aplicável. Foi adaptado após a migração do backend para **Rust** — a maior parte do workflow permanece igual, apenas os nomes e referências à stack foram atualizados.
 
@@ -20,16 +20,16 @@ Este documento reúne comandos e procedimentos operacionais do repositório, com
 ## 1) Clonar o repositório
 
 ```bash
-git clone https://github.com/leobravoe/node-fastify-backend-debitos-creditos-2025.git
+git clone https://github.com/leobravoe/rust-backend-debitos-creditos-rinha-2024.git
 ```
 
 Outras formas de clonagem:
 ```bash
 # Clonar apenas a branch principal
-git clone --branch main --single-branch https://github.com/leobravoe/node-fastify-backend-debitos-creditos-2025.git
+git clone --branch main --single-branch https://github.com/leobravoe/rust-backend-debitos-creditos-rinha-2024.git
 
 # Clonagem rasa (histórico reduzido)
-git clone --depth=1 https://github.com/leobravoe/node-fastify-backend-debitos-creditos-2025.git
+git clone --depth=1 https://github.com/leobravoe/rust-backend-debitos-creditos-rinha-2024.git
 ```
 
 ---
