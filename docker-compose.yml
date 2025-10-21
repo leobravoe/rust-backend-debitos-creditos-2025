@@ -44,7 +44,8 @@ services:
     expose:
       - "3001"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -71,7 +72,8 @@ services:
     expose:
       - "3002"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits:
