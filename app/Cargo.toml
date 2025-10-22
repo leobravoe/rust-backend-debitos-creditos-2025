@@ -32,7 +32,7 @@ version = "0.1.0"
 # Edições (como 2015, 2018, 2021) definem quais grandes recursos 
 # da linguagem estão disponíveis e como o código deve ser interpretado.
 #
-# ⚠️ ATENÇÃO: A edição "2024" ainda é experimental (instável). 
+# A edição "2024" ainda é experimental (instável). 
 # Para garantir estabilidade e compatibilidade com todas as bibliotecas, 
 # é altamente recomendado usar a edição estável mais recente, que é "2021".
 edition = "2024"
