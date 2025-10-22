@@ -174,19 +174,6 @@ BEGIN
     -- Este passo SÓ executa se o PASSO 1 (updated_account) for bem-sucedido
     -- (ou seja, se ele retornou uma linha).
     inserted_transaction AS (
-        -- ⚠️ ATENÇÃO: BUG CRÍTICO!
-        -- O INSERT abaixo está faltando a coluna `created_at`!
-        -- Sem ela, seu extrato retornará 'realizada_em: null', o que
-        -- causará falha nos testes da Rinha.
-        --
-        -- CORREÇÃO:
-        -- Mude de:
-        --   INSERT INTO transactions (account_id, amount, type, description)
-        --   SELECT p_account_id, p_amount, p_type, p_description
-        -- Para:
-        --   INSERT INTO transactions (account_id, amount, type, description, created_at)
-        --   SELECT p_account_id, p_amount, p_type, p_description, NOW()
-        --
         INSERT INTO transactions (account_id, amount, type, description)
         SELECT p_account_id, p_amount, p_type, p_description
         FROM updated_account -- Pega os dados do passo 1 (garante que só rode se o update funcionou)
