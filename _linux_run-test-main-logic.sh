@@ -85,19 +85,22 @@ run_cmd() {
 # =============== Steps ===============
 # Abaixo, a sequência de passos do fluxo de teste.
 
-wlog "[PASSO 1/5] Parando e removendo containers antigos (ignorar falhas)..."
+wlog "[PASSO 1/6] Parando e removendo containers antigos (ignorar falhas)..."
 run_cmd "docker compose down -v" "ignore" docker compose down -v || true
 # ^ Para e remove containers/volumes anteriores para garantir ambiente limpo.
 #   "ignore" e "|| true" garantem que falhas aqui não interrompam o fluxo.
 
+wlog "[PASSO 2/6] Forçando a remoção dos containers..."
+run_cmd "docker rm -f postgres app1 app2 nginx" "ignore" docker rm -f postgres app1 app2 nginx || true
+
 wlog ""
-wlog "[PASSO 2/5] Construindo e subindo novos containers (ignorar falhas)..."
+wlog "[PASSO 3/6] Construindo e subindo novos containers (ignorar falhas)..."
 run_cmd "docker compose up -d --build --compatibility --force-recreate " "ignore" docker compose --compatibility up -d --build --force-recreate || true
 # ^ Sobe os serviços em modo destacado (-d), reconstruindo imagens (--build),
 #   e ajustando recursos com --compatibility quando necessário.
 
 wlog ""
-wlog "[PASSO 3/5] Verificacao de Saude dos Containers..."
+wlog "[PASSO 4/6] Verificacao de Saude dos Containers..."
 # ^ Agora aguardamos todos os serviços essenciais estarem "rodando" e, se houver healthcheck,
 #   que estejam "healthy".
 
@@ -207,7 +210,7 @@ fi
 
 # Postgres readiness + cleanup
 wlog ""
-wlog "[PASSO 4/5] Limpando o banco de dados..."
+wlog "[PASSO 5/6] Limpando o banco de dados..."
 PG_ID="$(docker compose ps -q postgres | head -n1 || true)"
 # ^ Pega o ID do container do Postgres (o primeiro, caso haja mais de um).
 if [[ -z "${PG_ID}" ]]; then
@@ -226,7 +229,7 @@ else
         break
       fi
     fi
-    wlog "Aguardando DB aceitar conexoes..."
+    wlog "Aguardando DB aceitar conexões..."
     sleep 3
   done
   # Limpeza de dados para começar o teste sempre do zero.
@@ -237,7 +240,7 @@ fi
 
 # Gatling
 wlog ""
-wlog "[PASSO 5/5] Executando o teste de carga com Gatling..."
+wlog "[PASSO 6/6] Executando o teste de carga com Gatling..."
 # ^ Agora que tudo está pronto, executamos o Gatling (via Maven) para rodar a simulação de carga.
 pushd "${SCRIPT_DIR}/gatling" >/dev/null
 # ^ Entra na pasta "gatling" (salva a pasta anterior numa pilha para depois voltar com popd).

@@ -101,13 +101,16 @@ function Run-CmdUTF8 {
 }
 
 try {
-    WLog "[PASSO 1/5] Parando e removendo containers antigos (a ignorar falhas)..."
+    WLog "[PASSO 1/6] Parando e removendo containers antigos (a ignorar falhas)..."
     Run-CmdUTF8 -Title "docker-compose down -v" -CommandLine 'docker-compose down -v' -IgnoreExitCode
 
-    WLog "`n[PASSO 2/5] Construindo e subindo novos containers (a ignorar falhas)..."
-    Run-CmdUTF8 -Title "docker-compose up -d --build --force-recreate" -CommandLine 'docker-compose --compatibility up -d --build --force-recreate' -IgnoreExitCode
+    WLog "[PASSO 2/6] Forçando a remoção dos containers..."
+    Run-CmdUTF8 -Title "docker rm -f postgres app1 app2 nginx" -CommandLine 'docker rm -f postgres app1 app2 nginx' -IgnoreExitCode
 
-    WLog "`n[PASSO 3/5] Verificacao de Saude dos Containers..."
+    WLog "`n[PASSO 3/6] Construindo e subindo novos containers (a ignorar falhas)..."
+    Run-CmdUTF8 -Title "docker-compose up -d --build" -CommandLine 'docker-compose --compatibility up -d --build' -IgnoreExitCode
+
+    WLog "`n[PASSO 4/6] Verificacao de Saude dos Containers..."
     $timeoutSeconds = 90
     $services = "postgres", "app1", "app2", "nginx"   # <-- inclui nginx
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -148,11 +151,11 @@ try {
         throw "Timeout: Nem todos os containers ficaram prontos em $timeoutSeconds segundos."
     }
 
-    WLog "`n[PASSO 4/5] Limpando o banco de dados..."
+    WLog "`n[PASSO 5/6] Limpando o banco de dados..."
     Run-CmdUTF8 -Title "docker exec postgres psql reset" -CommandLine `
         'docker exec postgres psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1 -c "TRUNCATE TABLE transactions" -c "UPDATE accounts SET balance = 0"'
 
-    WLog "`n[PASSO 5/5] Executando o teste de carga com Gatling..."
+    WLog "`n[PASSO 6/6] Executando o teste de carga com Gatling..."
     Push-Location "gatling"
     # Refazemos envs dentro da sessão cmd chamada com configurações específicas para UTF-8:
     $gatlingExit = Run-CmdUTF8 -Title "mvnw gatling:test" -CommandLine `
