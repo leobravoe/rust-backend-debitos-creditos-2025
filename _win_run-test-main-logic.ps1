@@ -104,7 +104,7 @@ try {
     WLog "[PASSO 1/6] Parando e removendo containers antigos (a ignorar falhas)..."
     Run-CmdUTF8 -Title "docker-compose down -v" -CommandLine 'docker-compose down -v' -IgnoreExitCode
 
-    WLog "[PASSO 2/6] Forçando a remoção dos containers..."
+    WLog "[PASSO 2/6] Forcando a remocao dos containers..."
     Run-CmdUTF8 -Title "docker rm -f postgres app1 app2 nginx" -CommandLine 'docker rm -f postgres app1 app2 nginx' -IgnoreExitCode
 
     WLog "`n[PASSO 3/6] Construindo e subindo novos containers (a ignorar falhas)..."

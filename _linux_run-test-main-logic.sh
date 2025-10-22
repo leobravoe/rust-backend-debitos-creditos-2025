@@ -90,7 +90,7 @@ run_cmd "docker compose down -v" "ignore" docker compose down -v || true
 # ^ Para e remove containers/volumes anteriores para garantir ambiente limpo.
 #   "ignore" e "|| true" garantem que falhas aqui não interrompam o fluxo.
 
-wlog "[PASSO 2/6] Forçando a remoção dos containers..."
+wlog "[PASSO 2/6] Forcando a remocao dos containers......"
 run_cmd "docker rm -f postgres app1 app2 nginx" "ignore" docker rm -f postgres app1 app2 nginx || true
 
 wlog ""
