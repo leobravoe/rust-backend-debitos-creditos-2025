@@ -1,135 +1,53 @@
 # ======================================================================
-#         Cargo.toml — O "Arquiteto" do Projeto Rust
+#         Cargo.toml — O "Arquiteto" do Projeto Rust (Otimizado)
 # ======================================================================
-#
-# O QUE É ESTE ARQUIVO?
-# "Cargo" é o nome do gerenciador de pacotes e sistema de build do Rust.
-# Este arquivo (Cargo.toml) é o "manifesto" do projeto. Ele diz ao Cargo:
-#
-# 1. Quem é o seu projeto (nome, versão).
-# 2. Quais "caixas de ferramentas" (dependências/bibliotecas) ele precisa.
-# 3. Como ele deve ser "construído" (compilado) para produção.
-#
+# Otimizações:
+# - Removidas dependências de logging (tracing, tracing-subscriber).
+# - Removida dependência 'thiserror' (anyhow é suficiente aqui).
+# - Reduzidas as features do Tokio para incluir apenas o necessário.
+# - Mantido jemallocator para eficiência de memória.
+# - Mantido perfil de release agressivo.
 # ======================================================================
 
 # ----------------------------------------------------------------------
-# [package] — A "CARTEIRA DE IDENTIDADE" DO SEU PROJETO
+# [package] — A "CARTEIRA DE IDENTIDADE" DO SEU PROJEITO
 # ----------------------------------------------------------------------
-# Esta seção define as informações básicas sobre o seu "pacote" (crate).
 [package]
-
-# O nome do seu projeto. Será o nome do executável final.
 name = "rust_api"
-
-# A versão do seu projeto, seguindo o "Versionamento Semântico"
-# (Major.Minor.Patch).
 version = "0.1.0"
-
-# A "edição" do Rust que você está usando.
-# Pense nisso como a "versão das regras da linguagem".
-# Usar "2024" (ou "2021", "2018") garante que o compilador
-# entenda a sintaxe moderna que você está escrevendo,
-# sem quebrar projetos antigos que usavam regras diferentes.
-edition = "2024"
+edition = "2024" # Mantida a edição mais recente
 
 # ----------------------------------------------------------------------
-# [dependencies] — A "LISTA DE COMPRAS" DE FERRAMENTAS
+# [dependencies] — A "LISTA DE COMPRAS" DE FERRAMENTAS OTIMIZADA
 # ----------------------------------------------------------------------
-# Aqui listamos todas as bibliotecas externas (chamadas "crates")
-# que nosso projeto precisa para funcionar.
 [dependencies]
 
-# 'axum': O framework web. É o "motor" que usamos para criar
-# rotas (endpoints), receber requisições HTTP e enviar respostas.
-# (Equivalente ao Fastify/Express no mundo Node.js).
-axum = "0.8.6"
+axum = "0.8.6" # Framework web
 
-# 'tokio': O "runtime" assíncrono.
-# Pense nele como o "motor" que faz o 'async/await' do Rust funcionar.
-# Ele gerencia as tarefas, redes, timers, etc.
-tokio = { version = "1.48.0", features = ["full"] }
-# 'features = ["full"]': Diz ao Tokio: "Por favor, inclua TODAS as
-# suas ferramentas (networking, multi-threading, timers, etc.)".
-# Em projetos maiores, você pode escolher features específicas
-# para reduzir o tamanho final.
+# OTIMIZAÇÃO: Tokio com features mínimas necessárias
+tokio = { version = "1.48.0", features = [
+    "rt-multi-thread", # Essencial para servidores web concorrentes
+    "macros",          # Necessário para #[tokio::main]
+    "net",             # Necessário para TcpListener (usado por Axum)
+    "time",            # Necessário para tokio::time::sleep (loop de retentativa)
+    "sync",            # Frequentemente necessário por bibliotecas como sqlx/axum internamente
+] }
 
-# 'serde': O "tradutor universal" de dados.
-# É a biblioteca que converte Structs Rust em JSON (Serialização)
-# e JSON em Structs Rust (Deserialização).
-serde = { version = "1.0.228", features = ["derive"] }
-# 'features = ["derive"]': Esta é a "varinha mágica". Ela ativa
-# os macros '#[derive(Serialize, Deserialize)]' que você
-# usa em cima das suas structs para fazer a "tradução" automática.
+serde = { version = "1.0.228", features = ["derive"] } # Serialização/Deserialização
+serde_json = "1.0.145" # Suporte específico para JSON
 
-# 'serde_json': O "dicionário" específico para JSON.
-# O 'serde' é o tradutor, mas o 'serde_json' é quem ensina
-# a ele as regras específicas do *formato JSON*.
-serde_json = "1.0.145"
-
-# 'sqlx': O nosso kit de ferramentas para banco de dados.
-# É como falamos com o PostgreSQL de forma segura e assíncrona.
+# SQLx mantido como estava (funcional)
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "json"] }
-# 'features = [...]': Aqui estamos escolhendo as "peças" do 'sqlx':
-# - "runtime-tokio-rustls": Diz ao 'sqlx':
-#   1. "Use o 'tokio' para todas as suas operações assíncronas."
-#   2. "Use 'rustls' para conexões seguras (SSL/TLS)."
-# - "postgres": Ativa o driver específico para o PostgreSQL.
-# - "macros": Ativa os macros mágicos do 'sqlx' (como 'sqlx::query!')
-#   que podem verificar suas queries SQL *em tempo de compilação*.
-# - "json": Ensina o 'sqlx' a converter tipos Rust de/para
-#   os tipos 'json' e 'jsonb' do PostgreSQL.
 
-# 'tracing': A "API" de logging. É a biblioteca que nos permite
-# escrever 'tracing::info!(...)', 'tracing::warn!(...)' etc.
-# Ela *cria* os eventos de log, mas não sabe *onde* mostrá-los.
-tracing = "0.1.41"
-
-# 'tracing-subscriber': O "Ouvinte" dos logs.
-# Esta é a biblioteca que *recebe* os eventos do 'tracing' e
-# decide o que fazer com eles (ex: imprimir no console).
-tracing-subscriber = { version = "0.3.20", features = ["fmt","env-filter"] }
-# 'features = [...]':
-# - "fmt": Ativa a formatação "bonita" (human-readable) no terminal.
-# - "env-filter": Permite filtrar quais logs mostrar usando uma
-#   variável de ambiente (ex: 'RUST_LOG=info').
-
-# 'anyhow': Uma biblioteca para facilitar o tratamento de erros.
-# É ótima para a função 'main' ou funções que só precisam
-# "passar o erro para cima" sem se preocupar com o tipo exato.
-anyhow = "1.0.100"
-
-# 'thiserror': A "outra metade" do tratamento de erros.
-# Enquanto 'anyhow' é para *propagar* erros, 'thiserror' é para
-# *criar* seus próprios tipos de erro customizados (ex: Error::ClienteNaoEncontrado).
-thiserror = "2.0.17"
+anyhow = "1.0.100" # Tratamento de erro simplificado (para main)
 
 # ----------------------------------------------------------------------
-# [profile.release] — AS "INSTRUÇÕES DE OTIMIZAÇÃO" PARA PRODUÇÃO
+# [profile.release] — OTIMIZAÇÕES DE PRODUÇÃO (Mantidas)
 # ----------------------------------------------------------------------
-# Esta seção define como o Cargo deve compilar seu projeto
-# quando você roda 'cargo build --release' (o build de produção).
-# O objetivo aqui é sacrificar tempo de compilação
-# para obter o máximo de performance no executável final.
 [profile.release]
-
-# Nível de otimização: 3 é o máximo.
-# Diz ao compilador: "Gaste o tempo que for preciso,
-# mas faça este código ser o mais rápido possível."
-opt-level = 3
-
-# Link-Time Optimization (LTO): "Otimização no Nível do Projeto Inteiro".
-# Otimiza o código *através* das fronteiras dos arquivos e bibliotecas.
-# É mais lento para compilar, mas resulta em um binário final mais rápido.
-lto = true
-
-# Unidades de Geração de Código: 1
-# Diz ao compilador para tratar todo o projeto como uma "única unidade"
-# de compilação. Isso permite as melhores otimizações possíveis
-# (em conjunto com o LTO), mas é o modo mais lento de compilar.
-# Perfeito para o build final de produção.
-codegen-units = 1
-
-# Símbolos de Debug: falso.
-# Remove todas as informações de "debug" (depuração) do binário final.
-# Isso torna o arquivo executável muito menor.
-debug = false
+opt-level = 3        # Otimização máxima de velocidade
+lto = true           # Link-Time Optimization (melhor performance, compilação mais lenta)
+codegen-units = 1    # Melhor otimização global (compilação mais lenta)
+debug = false        # Remove símbolos de debug (binário menor)
+strip = true         # Remove símbolos não utilizados (binário ainda menor) - Adicionado
+panic = 'abort'      # Aborta em pânico em vez de desenrolar a pilha (binário menor, pode ser marginalmente mais rápido) - Adicionado

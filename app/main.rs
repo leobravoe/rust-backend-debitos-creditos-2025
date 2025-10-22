@@ -124,9 +124,10 @@ async fn main() -> anyhow::Result<()> {
         db_user, db_password, db_host, db_port, db_database
     );
 
-    // --- LOOP DE RETENTATIVA DE CONEXÃO ---
+    // Loop robusto que tenta conectar E rodar migrações.
     let pool_options = PgPoolOptions::new()
-        .max_connections(pg_max_connections);
+        .max_connections(pg_max_connections)
+        .min_connections(5); 
 
     let mut retries = 10;
     let pool = loop {
