@@ -27,3 +27,6 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- A ÚLTIMA LINHA: Cria uma tabela vazia apenas para sinalizar o fim.
+CREATE TABLE IF NOT EXISTS _init_done (id INT);
