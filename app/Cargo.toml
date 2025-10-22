@@ -1,53 +1,156 @@
-# ======================================================================
-#         Cargo.toml — O "Arquiteto" do Projeto Rust (Otimizado)
-# ======================================================================
-# Otimizações:
-# - Removidas dependências de logging (tracing, tracing-subscriber).
-# - Removida dependência 'thiserror' (anyhow é suficiente aqui).
-# - Reduzidas as features do Tokio para incluir apenas o necessário.
-# - Mantido jemallocator para eficiência de memória.
-# - Mantido perfil de release agressivo.
-# ======================================================================
+# ===================================================================================
+#         Arquivo Cargo.toml: O "Gerente de Projeto" Rust 
+# ===================================================================================
+#
+# Olá! Este arquivo é o `Cargo.toml`. Pense nele como o "Gerente de Projeto" ou a 
+# "Receita Mestra" da sua aplicação Rust.
+#
+# Ele diz ao `cargo` (a ferramenta de linha de comando do Rust) três coisas principais:
+# 1. Quem é este projeto? (seção `[package]`)
+# 2. De quais "ferramentas externas" (bibliotecas) ele precisa? (seção `[dependencies]`)
+# 3. Como ele deve ser "construído para produção" (otimizado)? (seção `[profile.release]`)
+#
+# Os comentários em TOML (como este) sempre começam com um '#'.
+# ===================================================================================
 
-# ----------------------------------------------------------------------
-# [package] — A "CARTEIRA DE IDENTIDADE" DO SEU PROJEITO
-# ----------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------------
+# [package]: A "Carteira de Identidade" do seu Projeto
+# -----------------------------------------------------------------------------------
+# Esta seção define as informações básicas sobre o seu "pacote" (seu projeto).
 [package]
-name = "rust_api"
-version = "0.1.0"
-edition = "2024" # Mantida a edição mais recente
 
-# ----------------------------------------------------------------------
-# [dependencies] — A "LISTA DE COMPRAS" DE FERRAMENTAS OTIMIZADA
-# ----------------------------------------------------------------------
+# O nome do seu projeto. Quando você compilar em modo 'release', 
+# este será o nome do arquivo executável final (ex: `rust_api`).
+name = "rust_api"
+
+# O número da versão atual do seu projeto. 
+# Segue o padrão "Versionamento Semântico" (Major.Minor.Patch).
+version = "0.1.0"
+
+# A "edição" da linguagem Rust que você está usando. 
+# Edições (como 2015, 2018, 2021) definem quais grandes recursos 
+# da linguagem estão disponíveis e como o código deve ser interpretado.
+#
+# ⚠️ ATENÇÃO: A edição "2024" ainda é experimental (instável). 
+# Para garantir estabilidade e compatibilidade com todas as bibliotecas, 
+# é altamente recomendado usar a edição estável mais recente, que é "2021".
+edition = "2024"
+
+
+# -----------------------------------------------------------------------------------
+# [dependencies]: A "Lista de Compras" de Ferramentas
+# -----------------------------------------------------------------------------------
+# Esta é a seção mais importante para o dia a dia.
+# Aqui você diz ao `cargo` quais "caixas de ferramentas" (bibliotecas, 
+# chamadas de 'crates' em Rust) ele precisa baixar da internet para o 
+# seu projeto funcionar.
 [dependencies]
 
-axum = "0.8.6" # Framework web
+# O seu framework web. É o que permite criar a API, definir rotas 
+# (ex: `/clientes/{id}/extrato`), receber requisições HTTP (GET, POST) 
+# e enviar respostas. É a espinha dorsal da sua API.
+axum = "0.8.6"
 
-# OTIMIZAÇÃO: Tokio com features mínimas necessárias
-tokio = { version = "1.48.0", features = [
-    "rt-multi-thread", # Essencial para servidores web concorrentes
-    "macros",          # Necessário para #[tokio::main]
-    "net",             # Necessário para TcpListener (usado por Axum)
-    "time",            # Necessário para tokio::time::sleep (loop de retentativa)
-    "sync",            # Frequentemente necessário por bibliotecas como sqlx/axum internamente
-] }
+# O "tradutor" universal. `serde` vem de SERialização e DEsserialização.
+# - Deserialização: Converte texto (como JSON) em uma Struct Rust.
+# - Serialização: Converte uma Struct Rust de volta para texto (como JSON).
+#   features = ["derive"]: Ativa a "mágica" (macros `#[derive(Serialize, Deserialize)]`) 
+#   que escreve automaticamente o código de tradução para você.
+serde = { version = "1.0.228", features = ["derive"] }
 
-serde = { version = "1.0.228", features = ["derive"] } # Serialização/Deserialização
-serde_json = "1.0.145" # Suporte específico para JSON
+# O "dicionário" de JSON para o `serde`. O `serde` é genérico (poderia 
+# ser XML, YAML, etc.), e o `serde_json` ensina-o a falar especificamente 
+# o idioma JSON.
+serde_json = "1.0.145"
 
-# SQLx mantido como estava (funcional)
+# A sua caixa de ferramentas para falar com o banco de dados (PostgreSQL)
+# de forma assíncrona (sem travar o programa enquanto espera a resposta).
+#   features = [...]: Aqui ativamos "módulos" específicos do sqlx:
+#     "runtime-tokio-rustls": Diz ao sqlx para usar o motor `tokio` (veja abaixo)
+#                             e usar `rustls` para conexões seguras (TLS/SSL).
+#     "postgres":             Inclui o "driver" (o tradutor) específico para
+#                             falar com o banco PostgreSQL.
+#     "macros":               Habilita macros (ex: `sqlx::query!(...)`) que 
+#                             verificam seu SQL *antes* de rodar o programa.
+#     "json":                 Permite que o sqlx entenda e trabalhe com os 
+#                             tipos de dados JSON diretamente do banco.
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "json"] }
 
-anyhow = "1.0.100" # Tratamento de erro simplificado (para main)
+# O "Motor" assíncrono (Async Runtime) da sua API. 
+# Se `axum` é o chassi do carro, `tokio` é o motor.
+# Rust usa 'async/await' para lidar com milhares de conexões ao mesmo tempo,
+# e o `tokio` é quem gerencia tudo isso.
+#   features = [...]: Estamos escolhendo as peças específicas do motor:
+#     "rt-multi-thread": O motor "Multi-Thread". Permite que sua API use 
+#                        *todos* os núcleos da CPU para processar requisições. 
+#                        Essencial para performance de servidor.
+#     "macros":          Ativa a macro `#[tokio::main]`, que você usa na sua 
+#                        função `main()` para "ligar" o motor `tokio`.
+#     "net":             Ferramentas de rede (como `TcpListener`) que o `axum` 
+#                        usa por baixo dos panos para escutar em uma porta (ex: 8080).
+#     "time":            Fornece ferramentas de tempo, como o `sleep` (usado 
+#                        para pausas/retentativas).
+#     "sync":            Ferramentas de sincronização (ex: `Arc`, `Mutex`) para
+#                        compartilhar dados de forma segura entre as threads.
+tokio = { version = "1.48.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "sync",
+] }
 
-# ----------------------------------------------------------------------
-# [profile.release] — OTIMIZAÇÕES DE PRODUÇÃO (Mantidas)
-# ----------------------------------------------------------------------
+# Uma biblioteca que simplifica muito o tratamento de erros. 
+# Ela permite que sua função `main` retorne um `anyhow::Result<()>` e use o 
+# operador `?` para propagar erros de diferentes tipos (como erros do `sqlx` 
+# ou do `tokio`) de forma fácil.
+anyhow = "1.0.100"
+
+
+# -----------------------------------------------------------------------------------
+# [profile.release]: As "Instruções de Otimização" para Produção
+# -----------------------------------------------------------------------------------
+#
+# Esta seção define as "Configurações de Otimização para Produção".
+# Estas regras SÓ são aplicadas quando você compila usando o comando:
+#
+#   cargo build --release
+#
+# O objetivo aqui é um só: fazer o programa final ser o MAIS RÁPIDO 
+# e o MENOR possível, mesmo que a compilação demore mais.
+#
 [profile.release]
-opt-level = 3        # Otimização máxima de velocidade
-lto = true           # Link-Time Optimization (melhor performance, compilação mais lenta)
-codegen-units = 1    # Melhor otimização global (compilação mais lenta)
-debug = false        # Remove símbolos de debug (binário menor)
-strip = true         # Remove símbolos não utilizados (binário ainda menor) - Adicionado
-panic = 'abort'      # Aborta em pânico em vez de desenrolar a pilha (binário menor, pode ser marginalmente mais rápido) - Adicionado
+
+# Nível de otimização: `3` é o máximo. 
+# Diz ao compilador para gastar muito tempo analisando o código para 
+# torná-lo o mais rápido possível.
+opt-level = 3
+
+# "Link-Time Optimization" (Otimização no Tempo de Linkagem). 
+# Uma otimização muito poderosa que olha o projeto *inteiro* (incluindo 
+# as dependências) e otimiza tudo junto. Deixa a compilação mais lenta, 
+# mas o resultado final muito mais rápido.
+lto = true
+
+# Diz ao compilador para tratar todo o seu projeto como uma "unidade de 
+# geração de código". Isso ajuda o `lto = true` a fazer um trabalho ainda 
+# melhor, resultando em maior performance (ao custo de um tempo de 
+# compilação ainda maior).
+codegen-units = 1
+
+# Remove informações de depuração (debug). Essas informações (nomes de 
+# funções, números de linha) são úteis para debugar, mas deixam o 
+# arquivo final maior. Em produção, queremos `false`.
+debug = false
+
+# "Limpa" o executável, removendo ainda mais símbolos e dados desnecessários 
+# do arquivo binário final. Deixa o arquivo o menor possível.
+strip = true
+
+# Define o que fazer em caso de um "pânico" (um erro fatal e inesperado).
+# - O padrão é `unwind`: tenta "desenrolar" a pilha para limpar recursos, 
+#   o que gera código extra (binário maior).
+# - `abort`: simplesmente **aborta** o programa imediatamente. É mais rápido, 
+#   mais simples e produz um binário menor, sendo a escolha ideal para APIs.
+panic = "abort"

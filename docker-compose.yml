@@ -146,7 +146,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
-      PG_MAX: 30                      # Exemplo de variável customizada
+      PG_MAX: 40                      # Exemplo de variável customizada
       HOSTNAME: app1                  # Útil para saber qual instância logou
 
     # "Expor" uma porta.
@@ -200,7 +200,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
-      PG_MAX: 30
+      PG_MAX: 40
       HOSTNAME: app2                  # Identifica como 'app2' nos logs
     expose:
       - "3002"
