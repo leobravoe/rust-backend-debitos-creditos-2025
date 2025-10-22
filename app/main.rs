@@ -1,4 +1,4 @@
-// =Main.rs — Versão Funcional Original (Logs Removidos)
+// =Main.rs — Versão Funcional (Logs Removidos) + Otimização SQL CTE
 // =================================================================================================
 
 /* 1) IMPORTAÇÕES */
@@ -60,7 +60,8 @@ END;
 $$ LANGUAGE plpgsql;
 "#;
 
-// Esta é a função SQL original que funcionava para você (com SELECT FOR UPDATE)
+// OTIMIZAÇÃO: Substituída a função original (SELECT FOR UPDATE)
+// por esta versão CTE, mais rápida e com sintaxe corrigida.
 const CREATE_TRANSACTION_FUNCTION_SQL: &str = r#"
 CREATE OR REPLACE FUNCTION process_transaction(
     p_account_id INT,
@@ -70,29 +71,29 @@ CREATE OR REPLACE FUNCTION process_transaction(
 )
 RETURNS JSON AS $$
 DECLARE
-    current_balance INT;
-    current_limit INT;
-    new_balance INT;
+    response JSON;
 BEGIN
-    SELECT balance, account_limit INTO current_balance, current_limit
-    FROM accounts WHERE id = p_account_id
-    FOR UPDATE;
+    WITH updated_account AS (
+        UPDATE accounts
+        SET balance = balance + CASE WHEN p_type = 'c' THEN p_amount ELSE -p_amount END
+        WHERE id = p_account_id AND (p_type = 'c' OR (balance - p_amount) >= -account_limit) -- Corrigido: account_limit com sublinhado
+        RETURNING balance, account_limit
+    ),
+    inserted_transaction AS (
+        INSERT INTO transactions (account_id, amount, type, description)
+        SELECT p_account_id, p_amount, p_type, p_description
+        FROM updated_account
+        RETURNING 1
+    )
+    SELECT json_build_object('saldo', ua.balance, 'limite', ua.account_limit)
+    INTO response
+    FROM updated_account ua;
 
-    IF p_type = 'd' THEN
-        new_balance := current_balance - p_amount;
-        IF new_balance < -current_limit THEN
-            RETURN '{"error": 1}';
-        END IF;
-    ELSE
-        new_balance := current_balance + p_amount;
+    IF response IS NULL THEN
+        RETURN '{"error": 1}'::json;
     END IF;
 
-    UPDATE accounts SET balance = new_balance WHERE id = p_account_id;
-
-    INSERT INTO transactions (account_id, amount, type, description)
-    VALUES (p_account_id, p_amount, p_type, p_description);
-
-    RETURN json_build_object('limite', current_limit, 'saldo', new_balance);
+    RETURN response;
 END;
 $$ LANGUAGE plpgsql;
 "#;
@@ -115,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     let db_user = std::env::var("DB_USER").unwrap_or("postgres".to_string());
     let db_password = std::env::var("DB_PASSWORD").unwrap_or("postgres".to_string());
     let db_database = std::env::var("DB_DATABASE").unwrap_or("postgres_api_db".to_string());
-    // O valor original "10" é mantido, pois era o que funcionava.
+    // O valor original "10" é mantido (será sobreposto pelo compose).
     let pg_max_connections = std::env::var("PG_MAX").unwrap_or("10".to_string()).parse::<u32>()?;
 
     let database_url = format!(
@@ -131,27 +132,25 @@ async fn main() -> anyhow::Result<()> {
     let pool = loop {
         match pool_options.clone().connect(&database_url).await {
             Ok(p) => {
-                // Log removido
                 break p;
             }
             Err(_e) => { // Erro '_e' agora é ignorado
                 retries -= 1;
                 if retries == 0 {
-                    // Log removido
                     std::process::exit(1);
                 }
-                // Log removido
                 sleep(Duration::from_secs(3)).await;
             }
         }
     };
     
     // --- RODANDO AS "MIGRAÇÕES" (SQLs de Fundação) ---
-    // Log removido
+    // A função run_migrations foi removida, migrações rodam aqui diretamente.
     sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;
     sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;
+    // Garante que a versão OTIMIZADA da função de transação seja criada.
     sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?;
-    // Log removido
+
 
     // --- PREPARANDO O ESTADO E O ROTEADOR ---
     let state = AppState {
@@ -169,7 +168,6 @@ async fn main() -> anyhow::Result<()> {
     let port = port_str.parse::<u16>()?;
     let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
 
-    // Log removido
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
