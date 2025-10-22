@@ -52,7 +52,7 @@ function WLog([string]$msg) {
 }
 
 # Função para converter caracteres acentuados para ASCII
-function Fix-Encoding {
+function fixEncoding {
     param([string]$Text)
     
     # Converte caracteres acentuados para suas versões ASCII
@@ -70,7 +70,7 @@ function Fix-Encoding {
 }
 
 # Executa comando externo sob 'cmd /c chcp 65001 & <comando>', capturando stdout+stderr
-function Run-CmdUTF8 {
+function runCmdUTF8 {
     param(
         [Parameter(Mandatory=$true)][string]$Title,
         [Parameter(Mandatory=$true)][string]$CommandLine,  # string única a ser interpretada pelo cmd.exe
@@ -85,7 +85,7 @@ function Run-CmdUTF8 {
         
         # Trata caracteres especiais que podem vir do Gatling/Maven
         # Converte caracteres mal codificados para UTF-8 correto
-        $line = Fix-Encoding $line
+        $line = fixEncoding $line
         
         # Escreve no arquivo de log
         $sw.WriteLine($line)
@@ -102,13 +102,13 @@ function Run-CmdUTF8 {
 
 try {
     WLog "[PASSO 1/6] Parando e removendo containers antigos (a ignorar falhas)..."
-    Run-CmdUTF8 -Title "docker-compose down -v" -CommandLine 'docker-compose down -v' -IgnoreExitCode
+    runCmdUTF8 -Title "docker-compose down -v" -CommandLine 'docker-compose down -v' -IgnoreExitCode
 
     WLog "[PASSO 2/6] Forcando a remocao dos containers..."
-    Run-CmdUTF8 -Title "docker rm -f postgres app1 app2 nginx" -CommandLine 'docker rm -f postgres app1 app2 nginx' -IgnoreExitCode
+    runCmdUTF8 -Title "docker rm -f postgres app1 app2 nginx" -CommandLine 'docker rm -f postgres app1 app2 nginx' -IgnoreExitCode
 
     WLog "`n[PASSO 3/6] Construindo e subindo novos containers (a ignorar falhas)..."
-    Run-CmdUTF8 -Title "docker-compose up -d --build" -CommandLine 'docker-compose --compatibility up -d --build' -IgnoreExitCode
+    runCmdUTF8 -Title "docker-compose up -d --build" -CommandLine 'docker-compose --compatibility up -d --build' -IgnoreExitCode
 
     WLog "`n[PASSO 4/6] Verificacao de Saude dos Containers..."
     $timeoutSeconds = 90
@@ -119,7 +119,7 @@ try {
     while ($stopwatch.Elapsed.TotalSeconds -lt $timeoutSeconds) {
         # Captura 'ps' por cmd para manter UTF-8 consistente
         $tmpFile = [System.IO.Path]::GetTempFileName()
-        Run-CmdUTF8 -Title "docker-compose ps" -CommandLine "docker-compose ps > `"$tmpFile`"" -IgnoreExitCode
+        runCmdUTF8 -Title "docker-compose ps" -CommandLine "docker-compose ps > `"$tmpFile`"" -IgnoreExitCode
         $statuses = Get-Content -LiteralPath $tmpFile -Encoding UTF8
         Remove-Item $tmpFile -ErrorAction SilentlyContinue
 
@@ -144,7 +144,7 @@ try {
     if ($healthyServices -ne $services.Length) {
         # Loga o estado atual com caminho 100% UTF-8
         $tmpFile = [System.IO.Path]::GetTempFileName()
-        Run-CmdUTF8 -Title "docker-compose ps (final)" -CommandLine "docker-compose ps > `"$tmpFile`"" -IgnoreExitCode
+        runCmdUTF8 -Title "docker-compose ps (final)" -CommandLine "docker-compose ps > `"$tmpFile`"" -IgnoreExitCode
         $statusLog = Get-Content -LiteralPath $tmpFile -Encoding UTF8 | Out-String
         Remove-Item $tmpFile -ErrorAction SilentlyContinue
         WLog "`n--- ESTADO ATUAL DOS CONTAINERS ---`n$statusLog"
@@ -152,13 +152,13 @@ try {
     }
 
     WLog "`n[PASSO 5/6] Limpando o banco de dados..."
-    Run-CmdUTF8 -Title "docker exec postgres psql reset" -CommandLine `
+    runCmdUTF8 -Title "docker exec postgres psql reset" -CommandLine `
         'docker exec postgres psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1 -c "TRUNCATE TABLE transactions" -c "UPDATE accounts SET balance = 0"'
 
     WLog "`n[PASSO 6/6] Executando o teste de carga com Gatling..."
     Push-Location "gatling"
     # Refazemos envs dentro da sessão cmd chamada com configurações específicas para UTF-8:
-    $gatlingExit = Run-CmdUTF8 -Title "mvnw gatling:test" -CommandLine `
+    $gatlingExit = runCmdUTF8 -Title "mvnw gatling:test" -CommandLine `
         'set "JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 -Dconsole.encoding=UTF-8" & set "MAVEN_OPTS=-Dfile.encoding=UTF-8 -Dconsole.encoding=UTF-8" & set "MAVEN_OPTS=%MAVEN_OPTS% -Dmaven.compiler.encoding=UTF-8" & mvnw.cmd gatling:test -Dgatling.simulationClass=simulations.RinhaBackendCrebitosSimulation' `
         -IgnoreExitCode
     Pop-Location
