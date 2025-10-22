@@ -21,12 +21,12 @@ arquivo `Cargo.toml`.
 // Importações do 'axum': Nosso framework web.
 use axum::{
     extract::{Path, State}, // 'Path' extrai dados da URL (ex: o 'id' em /clientes/{id}/...)
-                           // 'State' nos dá acesso ao "estado compartilhado" (nosso pool de banco de dados).
-    http::StatusCode,      // Permite enviar códigos de status HTTP (como 200 OK, 404 NOT FOUND, etc.).
+                            // 'State' nos dá acesso ao "estado compartilhado" (nosso pool de banco de dados).
+    http::StatusCode,       // Permite enviar códigos de status HTTP (como 200 OK, 404 NOT FOUND, etc.).
     response::IntoResponse, // Um 'trait' (tipo especial) que permite converter nossos retornos em respostas HTTP.
-    routing::{get, post},  // Funções para definir rotas HTTP (uma rota GET e uma rota POST).
-    Json, Router,         // 'Json' extrai/cria corpos de requisição/resposta JSON.
-                          // 'Router' é o que usamos para "mapear" as URLs para nossas funções.
+    routing::{get, post},   // Funções para definir rotas HTTP (uma rota GET e uma rota POST).
+    Json,                   // 'Json' extrai/cria corpos de requisição/resposta JSON.
+    Router,                 // 'Router' é o que usamos para "mapear" as URLs para nossas funções.
 };
 
 // Importação do 'serde': O "tradutor" de JSON.
