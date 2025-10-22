@@ -208,6 +208,37 @@ if ! all_services_ready; then
   exit 1
 fi
 
+# [PASSO 4.5/6] Aquecimento (Warm-up) das APIs
+wlog ""
+wlog "[PASSO 4.5/6] Aquecendo as APIs (Warm-up)..."
+BASE_URL="http://localhost:9999/clientes" # Nginx (load balancer)
+
+# Payload de transação válido
+WARMUP_PAYLOAD=$(printf '{"valor":1,"tipo":"c","descricao":"warmup"}')
+
+# O valida IDs de 1 a 5
+for id in {1..5}; do
+    EXTRATO_URL="${BASE_URL}/${id}/extrato"
+    TRANSACAO_URL="${BASE_URL}/${id}/transacoes"
+    
+    wlog "Aquecendo ID ${id}: GET ${EXTRATO_URL}"
+    # Usamos 'curl -f' (fail fast) e '|| wlog ...' para ignorar erros (equiv. a -ErrorAction SilentlyContinue)
+    # -f : Falha em erros HTTP (4xx/5xx), ativando o '||'
+    # -s : Modo silencioso
+    # -o /dev/null : Descarta a saída (body)
+    curl -f -s -o /dev/null "${EXTRATO_URL}" \
+        || wlog " (Ignorando erro de aquecimento GET para ID ${id})"
+    
+    wlog "Aquecendo ID ${id}: POST ${TRANSACAO_URL}"
+    curl -f -s -o /dev/null \
+        -H "Content-Type: application/json" \
+        -d "${WARMUP_PAYLOAD}" \
+        "${TRANSACAO_URL}" \
+        || wlog " (Ignorando erro de aquecimento POST para ID ${id})"
+done
+
+wlog "Aquecimento concluído. O banco será limpo a seguir."
+
 # Postgres readiness + cleanup
 wlog ""
 wlog "[PASSO 5/6] Limpando o banco de dados..."
@@ -232,6 +263,7 @@ else
     wlog "Aguardando DB aceitar conexões..."
     sleep 3
   done
+
   # Limpeza de dados para começar o teste sempre do zero.
   docker exec "${PG_ID}" psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1     -c "TRUNCATE TABLE transactions"     -c "UPDATE accounts SET balance = 0"     2>&1 | tee -a "${LOGFILE}"
   # ^ TRUNCATE transactions → remove transações anteriores

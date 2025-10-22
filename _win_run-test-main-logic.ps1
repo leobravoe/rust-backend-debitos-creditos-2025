@@ -7,9 +7,9 @@ param (
 
 # ====== UTF-8 de ponta a ponta ======
 # 1) Console/host e pipeline
-[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding           = New-Object System.Text.UTF8Encoding($false)  # influencia redirecionamento de PS->exe
+$OutputEncoding = New-Object System.Text.UTF8Encoding($false)  # influencia redirecionamento de PS->exe
 
 # 2) Code page do conhost herdado por processos CMD
 #    (executamos um 'chcp 65001' válido para a sessão atual)
@@ -21,7 +21,7 @@ $env:LC_ALL = "en_US.UTF-8"
 
 # 3) Maven/Java sempre em UTF-8
 $env:JAVA_TOOL_OPTIONS = "-Dfile.encoding=UTF-8"
-$env:MAVEN_OPTS        = "-Dfile.encoding=UTF-8"
+$env:MAVEN_OPTS = "-Dfile.encoding=UTF-8"
 
 # 4) Abrimos o arquivo com UTF-8 COM BOM (Notepad adora BOM; evita detecção ambígua)
 $Utf8WithBom = New-Object System.Text.UTF8Encoding($true)
@@ -46,7 +46,8 @@ function WLog([string]$msg) {
         # Escreve diretamente no arquivo usando UTF-8
         $sw.WriteLine($line)
         $sw.Flush() 
-    } catch {}
+    }
+    catch {}
     # Para o console, usa a string original
     Write-Host $line
 }
@@ -72,8 +73,8 @@ function fixEncoding {
 # Executa comando externo sob 'cmd /c chcp 65001 & <comando>', capturando stdout+stderr
 function runCmdUTF8 {
     param(
-        [Parameter(Mandatory=$true)][string]$Title,
-        [Parameter(Mandatory=$true)][string]$CommandLine,  # string única a ser interpretada pelo cmd.exe
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$CommandLine,  # string única a ser interpretada pelo cmd.exe
         [switch]$IgnoreExitCode
     )
     WLog "[CMD] $Title"
@@ -151,6 +152,39 @@ try {
         throw "Timeout: Nem todos os containers ficaram prontos em $timeoutSeconds segundos."
     }
 
+    WLog "`n[PASSO 4.5/6] Aquecendo as APIs (Warm-up)..."
+    $baseUrl = "http://localhost:9999/clientes" # Assumindo que o Nginx está em localhost:9999
+    
+    # Payload de transação válido para aquecer o endpoint POST
+    #
+    $warmupPayload = @{
+        valor = 1
+        tipo = "c"
+        descricao = "warmup"
+    } | ConvertTo-Json -Compress
+
+    foreach ($id in 1..5) {
+        $extratoUrl = "$baseUrl/$id/extrato"
+        $transacaoUrl = "$baseUrl/$id/transacoes"
+        
+        WLog "Aquecendo ID ${id}: GET $extratoUrl"
+        try {
+            # Usamos -UseBasicParsing por performance e -ErrorAction SilentlyContinue
+            # para não parar o script se o serviço ainda estiver subindo.
+            Invoke-WebRequest -Uri $extratoUrl -Method Get -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+        } catch {
+            WLog " (Ignorando erro de aquecimento GET: $($_.Exception.Message))"
+        }
+
+        WLog "Aquecendo ID ${id}: POST $transacaoUrl"
+        try {
+            Invoke-WebRequest -Uri $transacaoUrl -Method Post -UseBasicParsing -ContentType "application/json" -Body $warmupPayload -ErrorAction SilentlyContinue | Out-Null
+        } catch {
+            WLog " (Ignorando erro de aquecimento POST: $($_.Exception.Message))"
+        }
+    }
+    WLog "Aquecimento concluido. O banco sera limpo a seguir."
+
     WLog "`n[PASSO 5/6] Limpando o banco de dados..."
     runCmdUTF8 -Title "docker exec postgres psql reset" -CommandLine `
         'docker exec postgres psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1 -c "TRUNCATE TABLE transactions" -c "UPDATE accounts SET balance = 0"'
@@ -166,7 +200,8 @@ try {
 
     WLog "Teste concluido com sucesso."
 
-} catch {
+}
+catch {
     WLog ""
     WLog ("ERRO DETALHADO: " + $_.ToString())
 }
