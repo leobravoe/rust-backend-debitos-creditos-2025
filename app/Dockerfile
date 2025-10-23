@@ -69,7 +69,7 @@ COPY app/main.rs ./src/main.rs
 #
 # Muitas dependências do Rust (ex: `tokio`, `hyper`, `reqwest`) precisam
 # compilar código C "por baixo dos panos". Sem isso, a compilação falha.
-RUN apk add --no-cache build-base musl-dev openssl-dev curl
+RUN apk add --no-cache build-base musl-dev openssl-dev
 
 # `RUN` executa o comando de compilação do Rust.
 # `cargo build`: O comando padrão para compilar um projeto Rust.
@@ -118,7 +118,7 @@ ENV RUST_LOG=off
 # IMPORTANTE: Sem isso, seu aplicativo NÃO conseguirá fazer
 # chamadas HTTPS para outras APIs, bancos de dados, etc.
 # (Ele não saberia em quem "confiar" na internet).
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates curl
 
 # `COPY` é o "pulo do gato" do multi-stage!
 # `--from=builder`: Diz ao Docker para copiar de um estágio anterior,
