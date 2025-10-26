@@ -146,6 +146,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
+      PG_MIN: 5
       PG_MAX: 10                      # Exemplo de variável customizada
       HOSTNAME: app1                  # Útil para saber qual instância logou
 
@@ -208,6 +209,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_DATABASE: postgres_api_db
+      PG_MIN: 5
       PG_MAX: 10
       HOSTNAME: app2                  # Identifica como 'app2' nos logs
     expose:
