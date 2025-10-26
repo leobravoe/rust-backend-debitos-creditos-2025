@@ -9,7 +9,8 @@ axum = "0.8.6"
 
 # Serde para (de)serialização
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
+
+tower-http = { version = "0.5", features = ["limit"] }
 
 # SQLx (Postgres) assíncrono, com macros e suporte JSON
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "json"] }

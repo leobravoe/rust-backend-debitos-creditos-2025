@@ -1,9 +1,13 @@
 // src/main.rs
 // High-performance, sem logs, edition = "2024", PG_MAX obrigatório.
-// Otimizações: min_connections(5), idle/max_lifetime, JSON cru (::text), fetch_optional,
-// enum no payload, retry com backoff exponencial real, Content-Type uniforme com charset.
-// Endurecido p/ Gatling: 200 OK só quando há {"saldo":..., "limite":...} no body.
-// Ajustes pedidos: State<PgPool> direto, json_null() com bytes estáticos, #[inline] pontuais.
+// Otimizações adicionais nesta versão:
+// - State<PgPool> direto (sem AppState)
+// - json_null() com bytes estáticos e helpers #[inline]
+// - Retry de conexão com backoff exponencial real (cap em 30s) + acquire_timeout
+// - Pool com min_connections(5), idle_timeout, max_lifetime
+// - Limite de tamanho de corpo (DefaultBodyLimit) para requests JSON
+// - Listener explícito via TcpSocket com reuseaddr + backlog maior (1024)
+// - Conteúdo JSON cru (::text) vindo do Postgres; validações textuais baratas
 
 use axum::{
     extract::{Path, State},
@@ -12,16 +16,19 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use axum::http::header::CONTENT_TYPE;
+
 use axum::body::Body;
+use axum::http::header::CONTENT_TYPE;
 use serde::Deserialize;
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres};
 use std::net::SocketAddr;
+use tokio::net::TcpSocket;
 use tokio::time::{sleep, Duration};
+use tower_http::limit::RequestBodyLimitLayer;
 
-//
-// SQL constantes (mantidas do original)
-//
+// ------------------------------------------------------------
+// SQL constantes (PL/pgSQL) — mantidas da versão do usuário
+// ------------------------------------------------------------
 const CREATE_INDEX_SQL: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
 "#;
@@ -104,10 +111,8 @@ $$ LANGUAGE plpgsql;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum TipoTransacao {
-    #[serde(rename = "c")]
-    Credito,
-    #[serde(rename = "d")]
-    Debito,
+    #[serde(rename = "c")] Credito,
+    #[serde(rename = "d")] Debito,
 }
 impl TipoTransacao {
     #[inline(always)]
@@ -126,11 +131,13 @@ struct TransactionPayload {
     descricao: String,
 }
 
-// Queries promovidas a const (legibilidade/segurança)
+// Queries promovidas a const (executadas como TEXT via ::text)
 const Q_GET_EXTRATO: &str = "SELECT get_extrato($1)::text";
 const Q_PROCESS_TX: &str   = "SELECT process_transaction($1, $2, $3, $4)::text";
 
-// Corpos estáticos e helpers de resposta
+// ------------------------------------------------------------
+// Helpers de resposta
+// ------------------------------------------------------------
 const NULL_JSON: &[u8] = b"null";
 
 #[inline(always)]
@@ -147,84 +154,22 @@ fn json_null(status: StatusCode) -> Response {
     json_text(status, NULL_JSON)
 }
 
-// Checagens textuais baratas (evitar parse de JSON em hot-path)
+// Checagens textuais baratas (evitam parse de JSON no hot-path)
 #[inline]
 fn is_tx_success_body(s: &str) -> bool {
-    // Garante que o 200 só será usado quando houver, de fato, os campos esperados.
-    // Ex.: {"saldo":..., "limite":...}
     let s = s.trim_start();
     s.starts_with('{') && s.contains("\"saldo\"") && s.contains("\"limite\"")
 }
 
 #[inline]
 fn is_tx_error_body(s: &str) -> bool {
-    // Retorno de erro da função SQL — Ex.: {"error": 1}
     let s = s.trim_start();
     s.starts_with('{') && s.contains("\"error\"") && s.contains(":") && s.contains("1")
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // --- Variáveis de ambiente (PG_MAX obrigatório) ---
-    let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
-    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
-    let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
-    let db_password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
-    let db_database = std::env::var("DB_DATABASE").unwrap_or_else(|_| "postgres_api_db".to_string());
-
-    // PG_MAX é exigido e convertido para u32 (falha cedo se inválido)
-    let pg_max_connections: u32 = std::env::var("PG_MAX")?.parse::<u32>()?;
-
-    let database_url = format!(
-        "postgres://{}:{}@{}:{}/{}",
-        db_user, db_password, db_host, db_port, db_database
-    );
-
-    // --- Retry de conexão com backoff exponencial real (cap em 30s) ---
-    let mut attempt: u32 = 0;
-    let pool: PgPool = loop {
-        // Recria o builder a cada iteração (evita mover o mesmo valor)
-        let pool_options = PgPoolOptions::new()
-            .max_connections(pg_max_connections)
-            .min_connections(5)
-            .idle_timeout(Duration::from_secs(300))   // 5 min
-            .max_lifetime(Duration::from_secs(1800)); // 30 min
-
-        match pool_options.connect(&database_url).await {
-            Ok(p) => break p,
-            Err(_) => {
-                attempt = attempt.saturating_add(1);
-                if attempt >= 10 {
-                    std::process::exit(1);
-                }
-                // 1, 2, 4, 8, 16, 30 (cap em 30)
-                let exp = attempt.min(5); // até 2^5 = 32
-                let mut backoff = 1u64 << exp;
-                if backoff > 30 { backoff = 30; }
-                sleep(Duration::from_secs(backoff)).await;
-            }
-        }
-    };
-
-    // --- SQLs iniciais (índice + funções) ---
-    sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;
-    sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;
-    sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?;
-
-    // --- Router + estado (passa PgPool direto) ---
-    let app = Router::new()
-        .route("/clientes/{id}/extrato", get(get_extrato))
-        .route("/clientes/{id}/transacoes", post(post_transacao))
-        .with_state(pool);
-
-    // --- Servidor ---
-    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse()?;
-    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-    Ok(())
-}
-
+// ------------------------------------------------------------
+// Handlers
+// ------------------------------------------------------------
 async fn get_extrato(
     State(pool): State<PgPool>,
     Path(id): Path<i32>,
@@ -239,7 +184,6 @@ async fn get_extrato(
         .await
     {
         Ok(Some(json_text_body)) => {
-            // O extrato válido sempre é um objeto com "saldo" e "ultimas_transacoes".
             let s = json_text_body.trim_start();
             if s.starts_with('{') && s.contains("\"saldo\"") {
                 json_text(StatusCode::OK, json_text_body)
@@ -292,4 +236,77 @@ async fn post_transacao(
         }
         Err(_) => json_null(StatusCode::INTERNAL_SERVER_ERROR),
     }
+}
+
+// ------------------------------------------------------------
+// Main — pool endurecido + listener com backlog
+// ------------------------------------------------------------
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // --- Variáveis de ambiente (PG_MAX obrigatório) ---
+    let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
+    let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
+    let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
+    let db_password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
+    let db_database = std::env::var("DB_DATABASE").unwrap_or_else(|_| "postgres_api_db".to_string());
+
+    // PG_MAX é exigido e convertido para u32 (falha cedo se inválido)
+    let pg_max_connections: u32 = std::env::var("PG_MAX")?.parse::<u32>()?;
+
+    let database_url = format!(
+        "postgres://{}:{}@{}:{}/{}",
+        db_user, db_password, db_host, db_port, db_database
+    );
+
+    // --- Retry de conexão com backoff exponencial real (cap em 30s) ---
+    let mut attempt: u32 = 0;
+    let pool: PgPool = loop {
+        let pool_options = PgPoolOptions::new()
+            .max_connections(pg_max_connections)
+            .min_connections(5)
+            .idle_timeout(Duration::from_secs(300))   // 5 min
+            .max_lifetime(Duration::from_secs(1800))  // 30 min
+            .acquire_timeout(Duration::from_secs(2)); // evita hang sob saturação
+
+        match pool_options.connect(&database_url).await {
+            Ok(p) => break p,
+            Err(_) => {
+                attempt = attempt.saturating_add(1);
+                if attempt >= 10 {
+                    std::process::exit(1);
+                }
+                // 1, 2, 4, 8, 16, 30 (cap em 30)
+                let exp = attempt.min(5); // até 2^5 = 32
+                let mut backoff = 1u64 << exp;
+                if backoff > 30 { backoff = 30; }
+                sleep(Duration::from_secs(backoff)).await;
+            }
+        }
+    };
+
+    // --- SQLs iniciais (índice + funções) ---
+    sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;
+    sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;
+    sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?;
+
+    // --- Router + estado (passa PgPool direto) ---
+    let app = Router::new()
+        .route("/clientes/{id}/extrato", get(get_extrato))
+        .route("/clientes/{id}/transacoes", post(post_transacao))
+        .layer(RequestBodyLimitLayer::new(512)) // ~payloads minúsculos; rejeita bombas
+        .with_state(pool);
+
+    // --- Servidor com backlog maior ---
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()?;
+    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
+
+    let socket = TcpSocket::new_v4()?;
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    let listener = socket.listen(1024)?; // backlog maior que o padrão
+
+    axum::serve(listener, app).await?;
+    Ok(())
 }
