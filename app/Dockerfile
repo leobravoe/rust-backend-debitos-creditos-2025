@@ -34,6 +34,20 @@ FROM rust:alpine AS builder
 # Todos os comandos `RUN`, `COPY`, etc., serão executados a partir daqui.
 WORKDIR /usr/src/app
 
+# `RUN` executa a instalação de dependências do *sistema operacional*.
+# `apk add`: É o gerenciador de pacotes do Alpine (como o `apt-get` do Debian).
+# `--no-cache`: Diz ao `apk` para não guardar o cache de pacotes,
+#               mantendo esta camada de build menor.
+#
+# POR QUE ESTES PACOTES?
+# `build-base`: Contém ferramentas essenciais de compilação (compilador C, make).
+# `musl-dev`: Arquivos de desenvolvimento para a biblioteca C `musl` do Alpine.
+# `openssl-dev`: Arquivos de desenvolvimento para OpenSSL (necessário para HTTPS).
+#
+# Muitas dependências do Rust (ex: `tokio`, `hyper`, `reqwest`) precisam
+# compilar código C "por baixo dos panos". Sem isso, a compilação falha.
+RUN apk add --no-cache build-base musl-dev openssl-dev
+
 # `RUN` executa um comando no shell do contêiner.
 # `mkdir src`: O Cargo (gerenciador de pacotes do Rust) espera que
 #              o código-fonte principal (main.rs) esteja dentro
@@ -56,20 +70,6 @@ COPY app/Cargo.toml app/Cargo.lock* ./
 #                             para dentro da pasta `src` que criamos
 #                             no contêiner.
 COPY app/main.rs ./src/main.rs
-
-# `RUN` executa a instalação de dependências do *sistema operacional*.
-# `apk add`: É o gerenciador de pacotes do Alpine (como o `apt-get` do Debian).
-# `--no-cache`: Diz ao `apk` para não guardar o cache de pacotes,
-#               mantendo esta camada de build menor.
-#
-# POR QUE ESTES PACOTES?
-# `build-base`: Contém ferramentas essenciais de compilação (compilador C, make).
-# `musl-dev`: Arquivos de desenvolvimento para a biblioteca C `musl` do Alpine.
-# `openssl-dev`: Arquivos de desenvolvimento para OpenSSL (necessário para HTTPS).
-#
-# Muitas dependências do Rust (ex: `tokio`, `hyper`, `reqwest`) precisam
-# compilar código C "por baixo dos panos". Sem isso, a compilação falha.
-RUN apk add --no-cache build-base musl-dev openssl-dev
 
 # `RUN` executa o comando de compilação do Rust.
 # `cargo build`: O comando padrão para compilar um projeto Rust.
