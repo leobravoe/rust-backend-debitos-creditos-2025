@@ -16,9 +16,6 @@ use sqlx::{postgres::PgPoolOptions, PgPool, Postgres};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
-// Limite de corpo via middleware
-use tower_http::limit::RequestBodyLimitLayer;
-
 // --------------------- SQL necessárias para o teste ---------------------
 const CREATE_INDEX_SQL: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
@@ -196,10 +193,8 @@ async fn main() -> anyhow::Result<()> {
     let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
     let db_password = std::env::var("DB_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
     let db_database = std::env::var("DB_DATABASE").unwrap_or_else(|_| "postgres_api_db".to_string());
-
     let min_conns: u32 = std::env::var("PG_MIN").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
     let max_conns: u32 = std::env::var("PG_MAX").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
-
     let database_url = format!("postgres://{}:{}@{}:{}/{}", db_user, db_password, db_host, db_port, db_database);
 
     // after_connect com reborrow do &mut PgConnection para evitar mover 'conn'
@@ -208,18 +203,9 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(max_conns)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                sqlx::query("SET statement_timeout = '10000ms'")
-                    .execute(&mut *conn)
-                    .await?;
-
-                sqlx::query("SET idle_in_transaction_session_timeout = '2000ms'")
-                    .execute(&mut *conn)
-                    .await?;
-
                 sqlx::query("SET synchronous_commit = 'off'")
                     .execute(&mut *conn)
                     .await?;
-
                 Ok::<_, sqlx::Error>(())
             })
         })
@@ -233,18 +219,11 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/clientes/{id}/extrato", get(get_extrato))
         .route("/clientes/{id}/transacoes", post(post_transacao))
-        .layer(RequestBodyLimitLayer::new(512))
         .with_state(pool);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8080);
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
-
-    use axum::serve::ListenerExt; // importe isto
-
-    let listener = TcpListener::bind(addr).await?
-        .tap_io(|tcp_stream| {
-            let _ = tcp_stream.set_nodelay(true);
-        });
+    let listener = TcpListener::bind(addr).await?;
 
     // HTTP/1.1 e keep-alive permanecem por padrão no Hyper/Axum
     axum::serve(listener, app).await?;
