@@ -226,10 +226,10 @@ async fn main() -> anyhow::Result<()> {
     
     use axum::serve::ListenerExt; // <- importe isso
 
-    let listener = tokio::net::TcpListener::bind(addr).await?
-    .tap_io(|tcp| {
-        let _ = tcp.set_nodelay(true); // força TCP_NODELAY em cada conexão aceita
-    });
+    let listener = TcpListener::bind(addr).await?
+        .tap_io(|tcp| {
+            let _ = tcp.set_nodelay(true); // força TCP_NODELAY em cada conexão aceita
+        });
 
     // HTTP/1.1 e keep-alive permanecem por padrão no Hyper/Axum
     axum::serve(listener, app).await?;
