@@ -1,6 +1,5 @@
 // src/main.rs — versão mínima para o teste de carga fixo (sem logs, edition = "2024")
-// Mantém apenas o essencial exigido pela simulação: rotas, validações mínimas,
-// SQL (índice + funções), e mapeamento de status HTTP (200/422/404).
+// Rotas, validações mínimas, SQL e mapeamento de status HTTP (200/422/404).
 
 use axum::{
     extract::{Path, State},
@@ -97,24 +96,20 @@ END;
 $$ LANGUAGE plpgsql;
 "#;
 
-// ------------------------ Tipos de payload ------------------------
+// ------------------------ Payload enxuto ------------------------
 #[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum TipoTransacao { #[serde(rename = "c")] Credito, #[serde(rename = "d")] Debito }
-impl TipoTransacao { fn as_str(&self) -> &'static str { match self { Self::Credito => "c", Self::Debito => "d" } } }
-
-#[derive(Deserialize)]
-struct TransactionPayload {
-    valor: u32,
-    tipo: TipoTransacao,
-    descricao: String,
+struct TxPayload {
+    valor: u32,     // número positivo
+    tipo:  char,    // "c" ou "d"
+    descricao: String, // 1..=10 bytes
 }
 
 // ------------------------ SQL prontos (::text) ------------------------
 const Q_GET_EXTRATO: &str = "SELECT get_extrato($1)::text";
-const Q_PROCESS_TX: &str   = "SELECT process_transaction($1, $2, $3, $4)::text";
+const Q_PROCESS_TX:  &str = "SELECT process_transaction($1, $2, $3, $4)::text";
 
-// ------------------------ Helpers mínimos ------------------------
+// ------------------------ Helpers ------------------------
+#[inline(always)]
 fn json_text(status: StatusCode, body: impl Into<Body>) -> Response {
     Response::builder()
         .status(status)
@@ -123,19 +118,24 @@ fn json_text(status: StatusCode, body: impl Into<Body>) -> Response {
         .unwrap()
 }
 
+#[inline(always)]
 fn empty(status: StatusCode) -> Response {
-    Response::builder()
-        .status(status)
-        .body(Body::empty())
-        .unwrap()
+    Response::builder().status(status).body(Body::empty()).unwrap()
 }
 
 // ------------------------ Handlers ------------------------
-async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<i32>) -> Response {
-    if id < 1 || id > 5 { return empty(StatusCode::NOT_FOUND); }
+async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<u8>) -> Response {
+    let uid = id as u32;
+    if uid.wrapping_sub(1) > 4 {
+        return empty(StatusCode::NOT_FOUND);
+    }
 
-    match sqlx::query_scalar::<Postgres, String>(Q_GET_EXTRATO).bind(id).fetch_optional(&pool).await {
-        Ok(Some(json_text_body)) => json_text(StatusCode::OK, json_text_body),
+    match sqlx::query_scalar::<Postgres, Option<String>>(Q_GET_EXTRATO)
+        .bind(id as i32)
+        .fetch_one(&pool)
+        .await
+    {
+        Ok(Some(body)) => json_text(StatusCode::OK, body),
         Ok(None) => empty(StatusCode::NOT_FOUND),
         Err(_) => empty(StatusCode::INTERNAL_SERVER_ERROR),
     }
@@ -143,20 +143,35 @@ async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<i32>) -> Respons
 
 async fn post_transacao(
     State(pool): State<PgPool>,
-    Path(id): Path<i32>,
-    Json(payload): Json<TransactionPayload>,
+    Path(id): Path<u8>,
+    Json(payload): Json<TxPayload>,
 ) -> Response {
-    if id < 1 || id > 5 { return empty(StatusCode::NOT_FOUND); }
-    if payload.descricao.is_empty() || payload.descricao.len() > 10 { return empty(StatusCode::UNPROCESSABLE_ENTITY); }
-    if payload.valor == 0 { return empty(StatusCode::UNPROCESSABLE_ENTITY); }
+    let uid = id as u32;
+    if uid.wrapping_sub(1) > 4 {
+        return empty(StatusCode::NOT_FOUND);
+    }
 
-    let tipo = payload.tipo.as_str();
+    let v = payload.valor;
+    if v == 0 {
+        return empty(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let dlen = payload.descricao.len();
+    if dlen == 0 || dlen > 10 {
+        return empty(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let tipo = match payload.tipo {
+        'c' => "c",
+        'd' => "d",
+        _ => return empty(StatusCode::UNPROCESSABLE_ENTITY),
+    };
 
     match sqlx::query_scalar::<Postgres, String>(Q_PROCESS_TX)
-        .bind(id)
-        .bind(payload.valor as i32)
+        .bind(id as i32)
+        .bind(v as i32)
         .bind(tipo)
-        .bind(payload.descricao)
+        .bind(&payload.descricao)
         .fetch_one(&pool)
         .await
     {
@@ -166,10 +181,9 @@ async fn post_transacao(
     }
 }
 
-// ------------------------ Main enxuto ------------------------
+// ------------------------ Main ------------------------
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Conexão ao Postgres
     let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
     let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());
     let db_user = std::env::var("DB_USER").unwrap_or_else(|_| "postgres".to_string());
@@ -187,18 +201,15 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
-    // SQL essenciais
     sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;
     sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;
     sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?;
 
-    // Router mínimo
     let app = Router::new()
         .route("/clientes/{id}/extrato", get(get_extrato))
         .route("/clientes/{id}/transacoes", post(post_transacao))
         .with_state(pool);
 
-    // Servidor simples
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8080);
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
     let listener = TcpListener::bind(addr).await?;
