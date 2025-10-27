@@ -10,15 +10,16 @@ axum = "0.8.6"
 # Serde para (de)serialização
 serde = { version = "1.0.228", features = ["derive"] }
 
+# Limite de corpo
 tower-http = { version = "0.5", features = ["limit"] }
 
-# SQLx (Postgres) assíncrono, com macros e suporte JSON
+# SQLx (Postgres)
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "json"] }
 
-# Tokio runtime
+# Tokio
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 
-# Manejo simples de erros
+# Erros
 anyhow = "1.0.100"
 
 [profile.release]

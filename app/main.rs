@@ -16,6 +16,9 @@ use sqlx::{postgres::PgPoolOptions, PgPool, Postgres};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
+// Limite de corpo via middleware
+use tower_http::limit::RequestBodyLimitLayer;
+
 // --------------------- SQL necessárias para o teste ---------------------
 const CREATE_INDEX_SQL: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
@@ -99,8 +102,8 @@ $$ LANGUAGE plpgsql;
 // ------------------------ Payload enxuto ------------------------
 #[derive(Deserialize)]
 struct TxPayload {
-    valor: u32,     // número positivo
-    tipo:  char,    // "c" ou "d"
+    valor: u32,        // número positivo
+    tipo:  char,       // "c" ou "d"
     descricao: String, // 1..=10 bytes
 }
 
@@ -130,7 +133,9 @@ async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<u8>) -> Response
         return empty(StatusCode::NOT_FOUND);
     }
 
+    // Statement persistente
     match sqlx::query_scalar::<Postgres, Option<String>>(Q_GET_EXTRATO)
+        .persistent(true)
         .bind(id as i32)
         .fetch_one(&pool)
         .await
@@ -167,7 +172,9 @@ async fn post_transacao(
         _ => return empty(StatusCode::UNPROCESSABLE_ENTITY),
     };
 
+    // Statement persistente
     match sqlx::query_scalar::<Postgres, String>(Q_PROCESS_TX)
+        .persistent(true)
         .bind(id as i32)
         .bind(v as i32)
         .bind(tipo)
@@ -195,9 +202,27 @@ async fn main() -> anyhow::Result<()> {
 
     let database_url = format!("postgres://{}:{}@{}:{}/{}", db_user, db_password, db_host, db_port, db_database);
 
+    // after_connect com reborrow do &mut PgConnection para evitar mover 'conn'
     let pool = PgPoolOptions::new()
         .min_connections(min_conns)
         .max_connections(max_conns)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET statement_timeout = '10000ms'")
+                    .execute(&mut *conn)
+                    .await?;
+
+                sqlx::query("SET idle_in_transaction_session_timeout = '2000ms'")
+                    .execute(&mut *conn)
+                    .await?;
+
+                sqlx::query("SET synchronous_commit = 'off'")
+                    .execute(&mut *conn)
+                    .await?;
+
+                Ok::<_, sqlx::Error>(())
+            })
+        })
         .connect(&database_url)
         .await?;
 
@@ -208,11 +233,21 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/clientes/{id}/extrato", get(get_extrato))
         .route("/clientes/{id}/transacoes", post(post_transacao))
+        .layer(RequestBodyLimitLayer::new(512))
         .with_state(pool);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8080);
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
-    let listener = TcpListener::bind(addr).await?;
+
+    use axum::serve::ListenerExt; // importe isto
+
+    let listener = TcpListener::bind(addr).await?
+        .tap_io(|tcp_stream| {
+            let _ = tcp_stream.set_nodelay(true);
+        });
+
+    // HTTP/1.1 e keep-alive permanecem por padrão no Hyper/Axum
     axum::serve(listener, app).await?;
+
     Ok(())
 }
