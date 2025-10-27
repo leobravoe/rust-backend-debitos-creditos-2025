@@ -153,6 +153,9 @@ try {
     }
 
     WLog "`n[PASSO 4.5/6] Aquecendo as APIs (Warm-up)..."
+
+    Start-Sleep -Seconds 3
+    
     $baseUrl = "http://localhost:9999/clientes" # Assumindo que o Nginx está em localhost:9999
     
     # Payload de transação válido para aquecer o endpoint POST

@@ -211,6 +211,9 @@ fi
 # [PASSO 4.5/6] Aquecimento (Warm-up) das APIs
 wlog ""
 wlog "[PASSO 4.5/6] Aquecendo as APIs (Warm-up)..."
+
+sleep 3
+
 BASE_URL="http://localhost:9999/clientes" # Nginx (load balancer)
 
 # Payload de transação válido
