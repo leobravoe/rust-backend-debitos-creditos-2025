@@ -223,7 +223,13 @@ async fn main() -> anyhow::Result<()> {
 
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8080);
     let addr: SocketAddr = ([0, 0, 0, 0], port).into();
-    let listener = TcpListener::bind(addr).await?;
+    
+    use axum::serve::ListenerExt; // <- importe isso
+
+    let listener = tokio::net::TcpListener::bind(addr).await?
+    .tap_io(|tcp| {
+        let _ = tcp.set_nodelay(true); // força TCP_NODELAY em cada conexão aceita
+    });
 
     // HTTP/1.1 e keep-alive permanecem por padrão no Hyper/Axum
     axum::serve(listener, app).await?;
