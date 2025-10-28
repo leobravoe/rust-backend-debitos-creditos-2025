@@ -1,6 +1,6 @@
 # Guia de Comandos — `rust-backend-debitos-creditos-rinha-2024`
 
-Este documento reúne comandos e procedimentos operacionais do repositório, com variações por sistema operacional quando aplicável. Foi adaptado após a migração do backend para **Rust** — a maior parte do workflow permanece igual, apenas os nomes e referências à stack foram atualizados.
+Este projeto é uma implementação enxuta e de alta performance de uma API de débitos e créditos escrita em Rust, publicada atrás de um NGINX como reverse proxy e persistida em PostgreSQL, com orquestração via Docker Compose e simulação oficial da Rinha de Backend em Gatling. Ele foi pensado como um laboratório de desempenho reprodutível: você sobe toda a stack com um único comando, executa a simulação e coleta métricas comparáveis de latência (p95, p99 e média) em um ambiente controlado. O código e os manifests priorizam previsibilidade e medição honesta — índices e funções já prontos no banco, healthchecks encadeados, parâmetros de pool e timeouts ajustáveis — para que cada execução avalie a aplicação e não o acaso da infraestrutura. Serve tanto como base didática para estudar efeitos de otimizações quanto como template confiável para benchmarks.
 
 ---
 
