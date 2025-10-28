@@ -1,111 +1,91 @@
 #!/usr/bin/env bash
-# ^ Shebang: instrui o sistema a executar este arquivo com o interpretador "bash".
-#   Usar "/usr/bin/env" ajuda a encontrar o bash no PATH, tornando o script mais portátil.
-
-# _linux_run-test-stats-logger.sh — Linux docker stats logger
-# ---------------------------------------------------------------------------
-# O QUE ESTE SCRIPT FAZ?
-# - É um "logger" de estatísticas do Docker.
-# - Enquanto o processo principal (MAIN_PID) estiver vivo, ele coleta periodicamente
-#   a saída do comando `docker stats --no-stream` e grava em um arquivo de log.
-# - Ele também pode parar quando detecta um "arquivo sinal" (STOP_FLAG) criado por outro script.
-# - Trata sinais (CTRL+C / SIGTERM) para encerrar de forma limpa.
-# ---------------------------------------------------------------------------
+# ============================ VISÃO GERAL PARA INICIANTES =============================
+# Este script é um “coletor de estatísticas” do Docker durante um teste de carga.
+# Ele roda em paralelo ao processo principal do seu teste e, enquanto esse processo
+# existir, captura instantâneos de uso de CPU/Memória/Rede/etc. com `docker stats`.
+# O resultado vai para um arquivo de log, com data/hora em cada linha, em UTF-8.
+# Também há um mecanismo de parada: se surgir um arquivo “bandeira” (STOP_FLAG) ou
+# se o processo principal finalizar, o coletor encerra de forma limpa. Além disso,
+# se você apertar Ctrl+C, registramos o evento e saímos com um código padrão (130).
+# A ideia é deixar um rastro confiável do consumo dos containers durante a prova.
+# =====================================================================================
 
 set -Eeuo pipefail
-# set -E : mantém o comportamento do "ERR trap" em funções/subshells.
-# set -e : encerra o script se algum comando falhar (exit code != 0).
-# set -u : erro ao usar variável não definida (evita bugs silenciosos).
-# pipefail : se houver "cmd1 | cmd2", o pipeline falha se QUALQUER etapa falhar.
-# Esses flags deixam o script mais robusto e previsível.
+# “Modo estrito” do Bash:
+#  -E: mantém o comportamento de traps de erro dentro de funções/subshells;
+#  -e: se um comando falhar (status ≠ 0), o script aborta (salvo onde tratamos);
+#  -u: uso de variáveis não definidas vira erro (evita typos silenciosos);
+#  -o pipefail: num pipeline, falha se QUALQUER comando falhar (não só o último).
+# Isso ajuda a detectar problemas cedo e evita logs “enganosamente verdes”.
 
-# ---------------------------------------------------------------------------
-# PARÂMETROS DE ENTRADA
-# ---------------------------------------------------------------------------
-# 1º argumento: caminho do arquivo de log onde serão gravadas as estatísticas.
-# 2º argumento: PID do processo principal (aquele que estamos monitorando).
-# 3º argumento (opcional): caminho de um arquivo-flag; se existir, sinaliza para parar.
-# A notação ${var:?msg} força erro (e encerra) se o argumento obrigatório não for fornecido.
+# --------------------------- PARÂMETROS OBRIGATÓRIOS/OPCIONAIS ---------------------------
 LOGFILE="${1:?Usage: $0 <logfile> <main_pid> [stop_flag]}"
-MAIN_PID="${2:?Usage: $0 <logfile> <main_pid> [stop_flag]}"
-STOP_FLAG="${3:-}"
+# 1º argumento: caminho do arquivo que vai receber as estatísticas. Se faltar, erro.
 
-# ---------------------------------------------------------------------------
-# LOCALE/ENCODING
-# ---------------------------------------------------------------------------
-# Garante que timestamps, acentos e caracteres especiais sejam consistentes (UTF-8).
+MAIN_PID="${2:?Usage: $0 <logfile> <main_pid> [stop_flag]}"
+# 2º argumento: PID do processo “principal” do teste. Monitoramos sua existência.
+
+STOP_FLAG="${3:-}"
+# 3º argumento (opcional): caminho de um arquivo-sentinela. Se ele aparecer, paramos.
+
+# --------------------------------- LOCALIZAÇÃO/ENCODING ---------------------------------
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
+# Garantimos que timestamps e textos usem UTF-8, evitando acentos corrompidos.
+# O locale “C.UTF-8” é leve e suficiente para a maioria dos ambientes de CI/containers.
 
-# ---------------------------------------------------------------------------
-# FUNÇÃO DE TIMESTAMP
-# ---------------------------------------------------------------------------
-# ts() imprime data/hora no formato ISO-like com timezone, ex: 2025-09-24T13:22:05-0300
+# -------------------------------- FUNÇÃO DE TIMESTAMP -----------------------------------
 ts() { date '+%Y-%m-%dT%H:%M:%S%z'; }
+# Retorna algo como 2025-10-28T15:42:07-0300. Usamos em cada linha para reconstruir a linha do tempo.
 
-# ---------------------------------------------------------------------------
-# PREPARA O ARQUIVO DE LOG
-# ---------------------------------------------------------------------------
-# touch cria o arquivo se não existir (ou atualiza o "modified time" se existir).
+# ------------------------------ PREPARO DO ARQUIVO DE LOG --------------------------------
 touch "${LOGFILE}"
+# Cria o arquivo (se não existir) e garante permissão de escrita antes do loop.
 
-# Registra uma linha inicial avisando que o logger começou e qual PID está sendo monitorado.
 echo "$(ts) Logger iniciado. Monitorando PID=${MAIN_PID}" >> "${LOGFILE}"
+# Primeira linha do log: marca o início e informa qual PID estamos vigiando.
 
-# ---------------------------------------------------------------------------
-# TRATAMENTO DE SINAIS (CTRL+C / SIGTERM)
-# ---------------------------------------------------------------------------
-# Se o usuário interromper (SIGINT) ou o sistema pedir término (SIGTERM),
-# registramos no log e saímos com código 130 (convenção para interrupt).
+# ----------------------------- TRATAMENTO DE SINAIS (CTRL+C) -----------------------------
 cleanup() { echo "$(ts) Logger interrompido por sinal. Encerrando." >> "${LOGFILE}"; exit 130; }
+# Se recebermos SIGINT (Ctrl+C) ou SIGTERM, registramos e encerramos com 130 (convencional para “interrompido pelo usuário”).
+
 trap cleanup INT TERM
+# Conecta os sinais INT/TERM à função acima. Assim, mesmo em interrupções, o log fica coerente.
 
-# ---------------------------------------------------------------------------
-# LOOP PRINCIPAL DE COLETA
-# ---------------------------------------------------------------------------
-# Enquanto for verdadeiro (infinito até condição de parada), fazemos:
-# 1) Checar condições de parada (STOP_FLAG e vida do MAIN_PID).
-# 2) Se Docker disponível, coletar `docker stats --no-stream` e anexar ao log.
-# 3) Esperar 2 segundos e repetir.
+# --------------------------------- LOOP DE COLETA (2s) ----------------------------------
 while true; do
-  # ---------------------------------------------------------
-  # CONDIÇÕES DE PARADA
-  # ---------------------------------------------------------
+  # Laço infinito controlado por condições de saída claras. A cada volta:
+  # 1) Checamos se foi pedido para parar via STOP_FLAG.
+  # 2) Checamos se o processo principal ainda existe.
+  # 3) Tentamos coletar `docker stats --no-stream` e gravar com timestamp.
+  # 4) Esperamos 2s e repetimos, criando uma série temporal leve e legível.
 
-  # 1) Se foi passado um STOP_FLAG e o arquivo existe, encerramos o logger.
   if [[ -n "${STOP_FLAG}" && -f "${STOP_FLAG}" ]]; then
+    # Sinal de parada externo: outro script criou o arquivo-bandeira.
     echo "$(ts) Sinal de parada detectado. Encerrando logger." >> "${LOGFILE}"
     break
   fi
 
-  # 2) Se o processo principal já morreu, também paramos o logger.
-  #    O "kill -0 <PID>" NÃO MATA o processo: apenas testa se o PID existe e é acessível.
-  #    Se retornar erro, significa que o processo não está mais rodando.
   if ! kill -0 "${MAIN_PID}" 2>/dev/null; then
+    # O “kill -0” não mata: apenas testa se o PID existe. Se falhar, o main terminou.
     echo "$(ts) Processo principal finalizado. Encerrando logger." >> "${LOGFILE}"
     break
   fi
 
-  # ---------------------------------------------------------
-  # COLETA DE ESTATÍSTICAS DO DOCKER
-  # ---------------------------------------------------------
-  # `docker stats --no-stream` imprime uma tabela de uso de CPU/Memória/Rede/etc
-  # dos containers, mas somente uma fotografia (sem ficar atualizando ao vivo).
-  # Checamos primeiro se o comando funciona (Docker rodando, permissão, etc).
   if docker stats --no-stream >/dev/null 2>&1; then
-    # Se o comando funciona, executamos de verdade e lemos linha a linha.
+    # Se o Docker estiver acessível e o daemon responder, coletamos um snapshot único.
     docker stats --no-stream | while IFS= read -r line; do
-      # Para cada linha, prefixamos com timestamp e gravamos no LOGFILE.
-      printf '%s %s
-' "$(ts)" "$line" >> "${LOGFILE}"
+      # Prefixamos cada linha com timestamp e gravamos no arquivo, mantendo o formato de tabela.
+      printf '%s %s\n' "$(ts)" "$line" >> "${LOGFILE}"
     done
-    # Linha em branco para separar blocos de amostras (melhora leitura do log).
     printf '\n' >> "${LOGFILE}"
+    # Linha em branco separa “blocos” de amostras, facilitando leitura posterior.
   else
-    # Se não conseguimos rodar `docker stats`, registramos um erro pontual no log.
+    # Falha pontual (sem Docker, permissão, ou daemon indisponível): registramos o erro e seguimos.
     printf '%s [docker stats erro]\n' "$(ts)" >> "${LOGFILE}"
   fi
 
-  # Aguarda 2 segundos antes da próxima coleta, controlando a frequência do log.
   sleep 2
+  # Intervalo entre amostras. 2s costuma equilibrar granularidade e tamanho do log.
 done
+# Fim do loop. Chegamos aqui por STOP_FLAG, por término do processo principal ou por sinal capturado.

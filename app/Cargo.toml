@@ -1,31 +1,90 @@
+# =============================================================================
+# Cargo.toml — Guia explicativo para iniciantes
+# -----------------------------------------------------------------------------
+# Este arquivo diz ao Cargo (gerenciador de pacotes do Rust) “o que é” o seu
+# projeto, quais bibliotecas externas ele usa (dependências) e como compilar.
+# Leia os blocos na ordem: [package] → [dependencies] → [profile.release].
+# Nada do código abaixo foi alterado — apenas adicionamos comentários didáticos.
+# =============================================================================
+
+# [package] define metadados básicos do seu projeto (nome, versão, edição).
+# O Cargo usa isso para identificar sua crate e organizar o build/publicação.
 [package]
+
+# name: identificador da sua crate. Também costuma batizar o binário gerado
+# (se houver um src/main.rs). Evite espaços; use snake_case por convenção.
 name = "rust_api"
+
+# version: segue semântica MAIOR.MINOR.PATCH (SemVer). O Cargo usa essa info
+# ao publicar em crates.io e para controle interno do projeto.
 version = "0.1.0"
+
+# edition: escolhe a “edição” do Rust (conjunto de regras/recursos da linguagem).
+# A edição 2024 habilita padrões modernos sem quebrar compatibilidade de código.
 edition = "2024"
 
+
+# [dependencies] lista todas as bibliotecas externas (crates) necessárias
+# para compilar e rodar. O Cargo baixa, compila e versiona automaticamente.
 [dependencies]
-# Web framework
+
+# axum: framework web usado para criar rotas HTTP, extrair parâmetros,
+# gerar respostas, etc. A string de versão aqui é interpretada como um
+# intervalo “compatível” (ex.: "0.8.6" ~ ^0.8.6 → >=0.8.6, <0.9.0).
 axum = "0.8.6"
 
-# Serde para (de)serialização
+# serde: biblioteca padrão para (de)serialização (converter entre Rust e JSON).
+# A feature "derive" permite usar #[derive(Serialize, Deserialize)] nos seus tipos.
 serde = { version = "1.0.228", features = ["derive"] }
 
-# Limite de corpo
+# tower-http: componentes HTTP prontos (camadas/middlewares). A feature "limit"
+# habilita limitadores de corpo (tamanho máximo do request), úteis para evitar abuso.
 tower-http = { version = "0.5", features = ["limit"] }
 
-# SQLx (Postgres)
+# sqlx: acesso assíncrono ao banco (aqui, PostgreSQL). As features selecionadas:
+# - "runtime-tokio-rustls": integra com Tokio e usa TLS via rustls (sem OpenSSL).
+# - "postgres": driver do Postgres.
+# - "macros": ativa macros como query!() (checagem de SQL em compile-time quando possível).
+# - "json": suporte a tipos JSON do Postgres.
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "macros", "json"] }
 
-# Tokio
+# tokio: runtime assíncrono do Rust (executor de tarefas, timers, sockets, etc.).
+# As features habilitam:
+# - "rt-multi-thread": executor multi-thread (melhor para servidores).
+# - "macros": facilita usar #[tokio::main], #[tokio::test].
+# - "net": APIs de rede (TCP/UDP).
+# - "time": timers e delays.
+# - "sync": primitivas de sincronização (mpsc, Mutex, Notify…).
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
 
-# Erros
+# anyhow: ergonomia para lidar com erros em aplicações (tipo Result<anyhow::Error>).
+# Útil para “propagar” erros sem criar enums complexos em todo lugar.
 anyhow = "1.0.100"
 
+
+# [profile.release] controla como o binário final é otimizado quando você roda
+# `cargo build --release`. Aqui miramos desempenho e tamanho menor do executável.
 [profile.release]
+
+# opt-level = 3: nível máximo de otimização do compilador (melhor desempenho).
 opt-level = 3
+
+# lto = true: Link-Time Optimization. Permite que o linker otimize o programa
+# inteiro, removendo código morto e melhorando inlining entre crates.
 lto = true
+
+# codegen-units = 1: compila como “unidade única”, favorecendo otimizações
+# globais (build mais lento, binário mais otimizado).
 codegen-units = 1
+
+# debug = false: não embute informações de debug no binário de release,
+# reduzindo tamanho e tempo de link (útil para produção/benchmarks).
 debug = false
+
+# strip = true: remove símbolos extras do binário na etapa de linkagem,
+# encolhendo ainda mais o arquivo final (sem impactar execução).
 strip = true
+
+# panic = "abort": em caso de panic!, o processo aborta imediatamente em vez
+# de “desenrolar” a pilha (unwinding). Isso reduz tamanho/overhead em produção.
 panic = "abort"
