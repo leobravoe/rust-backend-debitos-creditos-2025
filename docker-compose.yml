@@ -107,7 +107,7 @@ services:
       # Este teste verifica se a tabela '_init_done' existe.
       # A tabela '_init_done' deve ser criada como ÚLTIMA linha do seu init.sql.
       # Isso garante que o script rodou 100% antes de marcar como healthy.
-      test: [ "CMD-SHELL", "psql -U postgres -d postgres_api_db -tAc \"SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_init_done'\" | grep -q 1" ]
+      test: [ "CMD-SHELL", "psql -U postgres -d postgres_api_db -tAc \"SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_init_done'\" | grep -q 1 && sleep 2" ]
       interval: "5s"     # Tentar a cada 5 segundos
       timeout: "5s"      # Desistir se o comando demorar mais de 5s
       retries: 10        # Tentar 10 vezes antes de marcar como "unhealthy"
@@ -161,7 +161,7 @@ services:
 
     # Healthcheck para a aplicação HTTP
     healthcheck:
-      test: [ "CMD-SHELL", "sleep 1 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1" ]
+      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1 && sleep 2" ]
       interval: "5s"
       timeout: "5s"
       retries: 60
@@ -216,7 +216,7 @@ services:
       - "3002"
     # Healthcheck para a aplicação HTTP
     healthcheck:
-      test: [ "CMD-SHELL", "sleep 1 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1" ]
+      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1 && sleep 2" ]
       interval: "5s"
       timeout: "5s"
       retries: 60
@@ -249,6 +249,14 @@ services:
     # Ligamos a porta 9999 do seu PC à porta 9999 do container.
     ports:
       - "9999:9999"
+
+    # Healthcheck para a aplicação HTTP
+    healthcheck:
+      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1" ]
+      interval: "5s"
+      timeout: "5s"
+      retries: 60
+      start_period: "60s"
 
     # Montando a configuração
     # Estamos "injetando" nosso próprio arquivo de configuração
