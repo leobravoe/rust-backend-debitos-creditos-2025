@@ -78,8 +78,8 @@ trap cleanup_interrupt INT TERM     # Registra a função acima para rodar autom
 run_once() {                        # Executa UMA iteração completa do teste (main + logger + limpeza).
   local iter="$1"                   # Número da iteração atual (1, 2, 3, ...).
 
-  local TIMESTAMP                   # Gera timestamp único para diferenciar arquivos desta iteração.
-  TIMESTAMP="$(date +%Y%m%d-%H%M%S)"# Formato AAAAMMDD-HHMMSS (legível e ordenável).
+  local TIMESTAMP                    # Gera timestamp único para diferenciar arquivos desta iteração.
+  TIMESTAMP="$(date +%Y%m%d-%H%M%S)" # Formato AAAAMMDD-HHMMSS (legível e ordenável).
 
   local MAIN_LOG_FILE="${SCRIPT_DIR}/__${TIMESTAMP}-iter${iter}-test_logs.txt"
                                     # Arquivo de log “principal” desta execução (saída do script de teste).

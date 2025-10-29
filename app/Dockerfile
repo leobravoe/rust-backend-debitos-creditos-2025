@@ -64,7 +64,7 @@ ENV RUST_LOG=off
 # Instala certificados de autoridade (CA) e curl:
 # - ca-certificates permite que o binário valide conexões HTTPS com outros serviços.
 # - curl é útil para debug e healthchecks dentro do contêiner (opcional, mas prático).
-RUN apk add --no-cache ca-certificates curl
+RUN apk add --no-cache ca-certificates curl pg_activity
 
 # Copia APENAS o binário final da fase “builder” para esta imagem minimalista.
 # Repare no "--from=builder": é assim que “puxamos” artefatos do estágio anterior.

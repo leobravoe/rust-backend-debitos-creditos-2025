@@ -85,7 +85,15 @@ docker stats postgres app1 app2
 
 ---
 
-## 6) Entrar na pasta do Gatling
+## 6) Monitorar uso do postgres
+
+```bash
+docker compose exec -it app1 sh -lc 'PGPASSWORD="postgres" pg_activity -h postgres -p 5432 -U postgres -d "postgres_api_db"'
+```
+
+---
+
+## 7) Entrar na pasta do Gatling
 
 ```bash
 cd gatling
@@ -94,7 +102,7 @@ cd gatling
 
 ---
 
-## 7) Resetar o banco e rodar a simulação (Gatling)
+## 8) Resetar o banco e rodar a simulação (Gatling)
 
 > Observação: após a migração para Rust a execução do Gatling **permanece igual** — usa-se o Maven Wrapper dentro da pasta `gatling`. A única alteração necessária é que a stack agora expõe as APIs como `app1` e `app2` (mesmos nomes dos containers usados durante os testes).
 
@@ -147,7 +155,7 @@ gatling/target/gatling/**/index.html
 
 ---
 
-## 8) Atualizar o projeto (sincronizar com o remoto)
+## 9) Atualizar o projeto (sincronizar com o remoto)
 
 ```bash
 git fetch --all
@@ -170,7 +178,7 @@ git clean -fdx     # inclui ignorados (ex.: target/, node_modules/)
 
 ---
 
-## 9) Informações do projeto
+## 10) Informações do projeto
 
 **Serviços:** NGINX (proxy/reverso), aplicações Rust (duas instâncias: `app1` e `app2`), PostgreSQL e cenários de carga com Gatling (Maven Wrapper).
 
