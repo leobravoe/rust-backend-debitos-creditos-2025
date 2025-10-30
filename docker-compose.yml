@@ -4,8 +4,7 @@
 # Este arquivo descreve como iniciar vários serviços (containers) que trabalham
 # juntos para formar um sistema completo. Use a leitura sequencial: primeiro a
 # seção "services" (cada peça do sistema) e, ao final, "volumes" (onde ficam os
-# dados persistentes). Não alteramos nada do conteúdo funcional; apenas
-# adicionamos comentários explicativos longos e próximos de quase cada linha.
+# dados persistentes).
 # =============================================================================
 
 services:                       # Raiz que agrupa todos os serviços (cada serviço é um container com propósito próprio).
@@ -82,7 +81,7 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
           cpus: "0.25"          # Limita a ~25% de um núcleo; simula capacidade restrita.
           memory: "100MB"       # Limita a 100 MB de RAM; força a app a rodar enxuta.
 
-    restart: unless-stopped     # Reinicia automaticamente em falhas, a menos que você interrompa manualmente.
+    restart: always             # Política de reinício automática: se o container parar/crashar, o Docker tenta subir novamente.
 
   app2:                         # Segunda instância idêntica da aplicação; permite balancear carga entre duas cópias.
     build:                      # Mesmo processo de build da app1 para construir a imagem.
@@ -122,7 +121,7 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
         limits:
           cpus: "0.25"          # Mesmo limite de CPU da app1 para manter simetria.
           memory: "100MB"       # Mesmo limite de memória da app1.
-    restart: unless-stopped     # Mesmo comportamento de reinício automático.
+    restart: always             # Política de reinício automática: se o container parar/crashar, o Docker tenta subir novamente.
 
   nginx:                        # Serviço de proxy reverso (porta de entrada do sistema para o “mundo externo”).
     image: nginx:alpine         # Imagem Nginx leve baseada em Alpine; inicia rápido e consome poucos recursos.
@@ -154,7 +153,7 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
           cpus: "0.2"           # Limita o uso de CPU do Nginx; ele geralmente é leve.
           memory: "100MB"       # Limita a memória do Nginx para evitar picos inesperados.
 
-    restart: unless-stopped     # Reinicia automaticamente, a menos que seja parado manualmente.
+    restart: always             # Política de reinício automática: se o container parar/crashar, o Docker tenta subir novamente.
 
 volumes:                        # Declaração formal dos volumes usados pelos serviços (armazenamento persistente gerenciado pelo Docker).
   pgdata:                       # Volume nomeado “pgdata”; é aqui que o Postgres mantém seus dados além do ciclo de vida do container.
