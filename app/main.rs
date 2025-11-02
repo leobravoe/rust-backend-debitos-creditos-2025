@@ -9,7 +9,6 @@ lógica de negócio pesada para funções SQL (criadas no próprio PostgreSQL).
 Como ler este arquivo:
 - Comentários longos explicam o "porquê" de cada parte existir.
 - Comentários curtos perto de quase cada linha explicam "o que" ela faz.
-- Nada do código foi alterado: apenas adicionamos explicações.
 ==========================================================================================
 */
 
