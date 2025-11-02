@@ -38,7 +38,7 @@ wlog() {
 }
 
 run_cmd() {
-  # Executor genérico com registro. Recebe um título (para contexto no log), um modo (“ignore” para não abortar em falha, “strict” para propagar erro) e o comando real com seus argumentos. Também força buffer por linha para evitar travamentos em pipes longos.
+  # Executor genérico com registro. Recebe um título (para contexto no log), um meio de falha (“ignore” para não abortar em falha, “strict” para propagar erro) e o comando real com seus argumentos. Também força buffer por linha para evitar travamentos em pipes longos.
   local title="$1"; shift
   local ignore="${1}"; shift
   wlog "[CMD] ${title}"
@@ -58,43 +58,45 @@ run_cmd "docker rm -f postgres app1 app2 nginx" "ignore" docker rm -f postgres a
 # Garantimos que nenhum container com esses nomes sobreviveu à primeira limpeza. É uma segunda camada de proteção para evitar estados zumbis que baguncem os próximos passos.
 
 wlog ""
+# Linha em branco proposital para separar visualmente as fases no log.
 wlog "[PASSO 3/6] Construindo e subindo novos containers (ignorar falhas)..."
 run_cmd "docker compose up -d --build --compatibility --force-recreate " "ignore" docker compose --compatibility up -d --build --force-recreate || true
 # Agora subimos tudo de novo. “--build” recompila imagens caso algo tenha mudado, “--force-recreate” não tenta reaproveitar containers antigos, e “--compatibility” traduz limites de recursos do Compose para ambientes sem Swarm. Rodamos em modo destacado (-d) para que o script continue controlando o restante.
 
 wlog ""
+# Nova quebra visual para destacar a etapa de readiness.
 wlog "[PASSO 4/6] Verificacao de Saude dos Containers..."
 # Entramos na fase de espera ativa (“readiness”). Não basta os processos estarem “de pé”: precisamos saber se estão prontos para receber tráfego. Para isso, conversamos com o Docker e, se houver healthcheck, exigimos estado “healthy”.
 
 SERVICES=("postgres" "app1" "app2" "nginx")
-# Esta lista define os serviços essenciais para o teste. Você pode ajustá-la se o seu ambiente mudar, mas para a simulação atual esses quatro são suficientes.
+# Serviços essenciais que precisamos ver prontos. A ordem aqui influencia apenas a apresentação nos logs, não a lógica.
 
 TIMEOUT=90
 DEADLINE=$(( $(date +%s) + TIMEOUT ))
-# Definimos um prazo máximo de espera. Isso evita loops infinitos quando algo está mal configurado. Se a deadline passar e o conjunto não estiver pronto, emitimos diagnóstico claro e encerramos.
+# Prazo máximo (em segundos) para toda a verificação de readiness. Evita loops infinitos em caso de configuração incorreta.
 
 get_ids_for_service() {
   docker compose ps -q "$1" 2>/dev/null | sed '/^$/d' || true
 }
-# Esta função devolve os IDs dos containers de um serviço informado. Usamos IDs porque são a referência mais confiável para inspecionar estado com “docker inspect”.
+# Devolve os IDs (hashes) dos containers do serviço informado. Trabalhar por ID é mais robusto do que por nome para inspeções.
 
 is_container_running() {
   local id="$1"
   [[ "$(docker inspect -f '{{.State.Status}}' "${id}" 2>/dev/null || echo 'unknown')" == "running" ]]
 }
-# Checamos se o container está efetivamente no estado “running”. Se não estiver, não adianta testar healthcheck ainda.
+# Verifica se o container está no estado “running”. Só depois faz sentido cobrar healthcheck.
 
 has_healthcheck() {
   local id="$1"
   [[ -n "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${id}" 2>/dev/null)" ]]
 }
-# Detectamos se existe um healthcheck definido para aquele container. Caso não haja, consideraremos “running” como suficiente para ele.
+# Detecta se existe healthcheck configurado para esse container (pode não haver, dependendo da imagem).
 
 is_container_healthy() {
   local id="$1"
   [[ "$(docker inspect -f '{{.State.Health.Status}}' "${id}" 2>/dev/null || echo 'none')" == "healthy" ]]
 }
-# Quando há healthcheck, o estado “healthy” é o sinal de que passou nas verificações internas que você configurou (por exemplo, “responde a /extrato”).
+# Quando há healthcheck, “healthy” indica que passou nas verificações internas (ex.: resposta a um endpoint).
 
 all_services_ready() {
   # A regra de ouro: cada serviço precisa ter ao menos um container running; se o serviço tem healthcheck, esse container também precisa estar healthy. Só então consideramos o conjunto pronto.
@@ -150,12 +152,14 @@ healthy_count() {
 while (( $(date +%s) < DEADLINE )); do
   # Loop de espera com feedback: mostramos quantos serviços já estão prontos e saímos assim que todos estiverem. Se não atingir a condição, tentamos de novo depois de alguns segundos.
   hc=$(healthy_count)
+  # Armazenamos em “hc” a contagem atual de serviços prontos para registrar no log.
   wlog "Aguardando... (${hc} de ${#SERVICES[@]} servicos prontos)"
   if all_services_ready; then
     wlog "Todos os servicos essenciais estao prontos! A continuar."
     break
   fi
   sleep 5
+  # Pause curto antes de tentar novamente; reduz churn de inspeções e dá tempo para os healthchecks atualizarem.
 done
 
 if ! all_services_ready; then
@@ -168,40 +172,52 @@ if ! all_services_ready; then
 fi
 
 wlog ""
+# Quebra visual antes do aquecimento.
 wlog "[PASSO 4.5/6] Aquecendo as APIs (Warm-up)..."
 # O aquecimento faz chamadas leves antes do teste real para “esquentar” caches, JITs, conexões e pools. Isso melhora a repetibilidade das medições e aproxima o cenário de produção, onde raramente tudo está 100% frio.
 sleep 3
+# Pequena espera para garantir que serviços recém-“healthy” tenham estabilizado antes do primeiro acesso real.
 BASE_URL="http://localhost:9999/clientes"
 # Esta URL passa pelo Nginx, que distribui entre as instâncias de aplicação. Isso aquece também o balanceador e o caminho real do tráfego.
 WARMUP_PAYLOAD=$(printf '{"valor":1,"tipo":"c","descricao":"warmup"}')
 # Enviamos um payload mínimo, válido e barato. O foco é ativar o caminho crítico da aplicação com o menor custo possível.
 
-for id in {1..5}; do
-    EXTRATO_URL="${BASE_URL}/${id}/extrato"
-    TRANSACAO_URL="${BASE_URL}/${id}/transacoes"
-    # Para cada cliente de 1 a 5, exercitamos o GET de extrato e um POST de transação de crédito. Isso cobre leitura e escrita e ajuda a inicializar planos de execução SQL e caches de conexões.
+for run in {1..5}; do
+    # Repetimos o aquecimento algumas vezes para fixar caches e JIT, reduzindo variabilidade inicial entre execuções.
+    wlog "=== Rodada ${run} de aquecimento ==="
 
-    wlog "Aquecendo ID ${id}: GET ${EXTRATO_URL}"
-    curl -f -s -o /dev/null "${EXTRATO_URL}" \
-        || wlog " (Ignorando erro de aquecimento GET para ID ${id})"
-    # Usamos “-f” para falhar rapidamente em 4xx/5xx, “-s” para silêncio e “-o /dev/null” para descartar corpo. Se falhar, apenas registramos e seguimos, já que é aquecimento e não métrica.
+    for id in {1..5}; do
+        EXTRATO_URL="${BASE_URL}/${id}/extrato"
+        wlog "Aquecendo ID ${id}: GET ${EXTRATO_URL}"
+        # Flags do curl: -f (falha em HTTP >= 400), -s (silencioso) e -o /dev/null (descarta corpo da resposta). Mantemos apenas o status.
+        curl -f -s -o /dev/null "${EXTRATO_URL}" \
+            || wlog " (Ignorando erro de aquecimento GET para ID ${id})"
+    done
 
-    wlog "Aquecendo ID ${id}: POST ${TRANSACAO_URL}"
-    curl -f -s -o /dev/null \
-        -H "Content-Type: application/json" \
-        -d "${WARMUP_PAYLOAD}" \
-        "${TRANSACAO_URL}" \
-        || wlog " (Ignorando erro de aquecimento POST para ID ${id})"
-    # O POST aquece validações de payload, acesso ao banco e caminho de atualização. Repare que continuamos mesmo com falhas isoladas para não abortar todo o fluxo antes do teste.
+    for id in {1..5}; do
+        TRANSACAO_URL="${BASE_URL}/${id}/transacoes"
+        wlog "Aquecendo ID ${id}: POST ${TRANSACAO_URL}"
+        # POST com JSON leve aquecendo a trilha de gravação/validação. Novamente descartamos o corpo e registramos somente falhas relevantes.
+        curl -f -s -o /dev/null \
+            -H "Content-Type: application/json" \
+            -d "${WARMUP_PAYLOAD}" \
+            "${TRANSACAO_URL}" \
+            || wlog " (Ignorando erro de aquecimento POST para ID ${id})"
+    done
 done
 
 wlog "Aquecimento concluído. O banco será limpo a seguir."
 # Após o warm-up, voltamos o estado dos dados ao “ponto zero” para que o teste tenha condições iniciais padronizadas e comparáveis entre execuções.
 
+sleep 4
+# Pequena espera para garantir que o aquecimento terminou.
+
 wlog ""
+# Separador visual antes da rotina de limpeza do banco.
 wlog "[PASSO 5/6] Limpando o banco de dados..."
 PG_ID="$(docker compose ps -q postgres | head -n1 || true)"
-# Aqui capturamos o ID do container Postgres. Usamos “head -n1” porque normalmente só há um, mas, se houver mais, pegamos o primeiro.
+# Capturamos o ID do container Postgres (se houver mais de um por algum motivo, pegamos o primeiro).
+
 if [[ -z "${PG_ID}" ]]; then
   wlog "Aviso: container do postgres nao encontrado; pulando limpeza."
 else
@@ -221,13 +237,18 @@ else
     fi
     wlog "Aguardando DB aceitar conexões..."
     sleep 3
+    # Pequena espera entre tentativas para não saturar o container durante a subida.
   done
 
-  docker exec "${PG_ID}" psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1     -c "TRUNCATE TABLE transactions"     -c "UPDATE accounts SET balance = 0"     2>&1 | tee -a "${LOGFILE}"
-  # Esta linha faz a limpeza real: TRUNCATE elimina todas as transações acumuladas e o UPDATE zera os saldos das contas. O parâmetro ON_ERROR_STOP faz o psql parar no primeiro erro, e redirecionamos tudo para o log para auditoria.
+  docker exec "${PG_ID}" psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1 \
+    -c "TRUNCATE TABLE transactions" \
+    -c "UPDATE accounts SET balance = 0" \
+    2>&1 | tee -a "${LOGFILE}"
+  # Limpeza efetiva: TRUNCATE remove todas as transações; UPDATE zera saldos. ON_ERROR_STOP aborta na primeira falha para evitar estado parcial. Tudo é registrado no log.
 fi
 
 wlog ""
+# Separador visual antes da etapa final de execução do teste.
 wlog "[PASSO 6/6] Executando o teste de carga com Gatling..."
 # Chegamos ao grande momento: disparamos a simulação configurada no projeto Gatling. Entramos na pasta “gatling” para que o Maven encontre o pom e as classes corretas.
 pushd "${SCRIPT_DIR}/gatling" >/dev/null
@@ -235,7 +256,7 @@ pushd "${SCRIPT_DIR}/gatling" >/dev/null
 stdbuf -oL -eL mvn -B -Dfile.encoding=UTF-8 \
   gatling:test -Dgatling.simulationClass=simulations.RinhaBackendCrebitosSimulation \
   2>&1 | tee -a "${LOGFILE}"
-# Rodamos o plugin do Gatling via Maven em modo batch (-B) para evitar prompts. Forçamos UTF-8 e linearizamos buffers para que os logs fluam sem travas. Registramos tanto no console quanto no arquivo.
+# Executamos o plugin do Gatling via Maven (modo batch -B), forçando UTF-8 e buffer por linha para logs previsíveis. A classe de simulação é informada explicitamente para controlar qual carga rodar.
 
 G_EXIT=${PIPESTATUS[0]}
 # Em pipelines, “$?” só captura o último comando. “PIPESTATUS[0]” guarda o status do primeiro (o mvn), que é o que nos importa para saber se a simulação foi bem-sucedida.

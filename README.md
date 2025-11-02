@@ -10,10 +10,11 @@ Este projeto é uma implementação enxuta e de alta performance de uma API de d
 3. [Derrubar containers, redes e volumes](#3-derrubar-containers-redes-e-volumes)
 4. [Subir a stack com Docker Compose](#4-subir-a-stack-com-docker-compose)
 5. [Monitorar uso de recursos](#5-monitorar-uso-de-recursos)
-6. [Entrar na pasta do Gatling](#6-entrar-na-pasta-do-gatling)
-7. [Resetar o banco e rodar a simulação (Gatling)](#7-resetar-o-banco-e-rodar-a-simulação-gatling)
-8. [Atualizar o projeto (sincronizar com o remoto)](#8-atualizar-o-projeto-sincronizar-com-o-remoto)
-9. [Informações do projeto](#9-informações-do-projeto)
+6. [Monitorar uso do postgres](#6-monitorar-uso-do-postgres)
+7. [Entrar na pasta do Gatling](#7-entrar-na-pasta-do-gatling)
+8. [Resetar o banco e rodar a simulação (Gatling)](#8-resetar-o-banco-e-rodar-a-simulação-gatling)
+9. [Atualizar o projeto (sincronizar com o remoto)](#9-atualizar-o-projeto-sincronizar-com-o-remoto)
+10. [Informações do projeto](#10-informações-do-projeto)
 
 ---
 

@@ -64,7 +64,7 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
       - "3001"                  # A outra aplicação (ex.: Nginx) pode alcançar app1:3001 via rede interna.
 
     healthcheck:                # Verificação de saúde HTTP simples para garantir que a app esteja respondendo.
-      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1 && sleep 2" ]
+      test: [ "CMD-SHELL", "sleep 1 && curl -f http://localhost:$$PORT/health || exit 1 && sleep 1" ]
                                 # Faz um GET local; se falhar, healthcheck retorna erro e o Docker marca como “unhealthy”.
       interval: "5s"            # Checa a cada 5 segundos.
       timeout: "5s"             # Se a resposta demorar mais de 5 segundos, considera falha.
@@ -106,7 +106,7 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
       - "3002"                  # Expõe apenas para a rede interna; Nginx acessa app2:3002.
 
     healthcheck:                # Checagem de saúde da app2 (igual à app1, mas apontando para sua própria porta via $$PORT).
-      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1 && sleep 2" ]
+      test: [ "CMD-SHELL", "sleep 1 && curl -f http://localhost:$$PORT/health || exit 1 && sleep 1" ]
       interval: "5s"
       timeout: "5s"
       retries: 60

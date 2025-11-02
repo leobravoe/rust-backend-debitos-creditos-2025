@@ -16,6 +16,7 @@ param (
 )
 # A diretiva “param” declara os parâmetros de entrada do script.
 # Aqui recebemos o caminho completo do arquivo de log final para esta execução.
+# Observação: este parâmetro é obrigatório no fluxo atual; se vier vazio/nulo, a abertura do arquivo falhará.
 
 # ========================= BLOCO 1 — CONFIGURAÇÃO DE UTF-8 =========================
 # A ideia deste bloco é “blindar” toda a sessão para que NADA escape do padrão UTF-8.
@@ -62,6 +63,7 @@ $sw = New-Object System.IO.StreamWriter($fs, $Utf8WithBom)
 
 $PSDefaultParameterValues['Out-File:Encoding']   = 'utf8BOM'
 # Define o padrão para cmdlets que usam Out-File: sempre salvar com UTF-8 e BOM.
+# Nota: $PSDefaultParameterValues afeta apenas a sessão atual.
 
 $PSDefaultParameterValues['Add-Content:Encoding'] = 'utf8BOM'
 # Define o padrão para Add-Content: também manter UTF-8 com BOM ao anexar textos.
@@ -132,6 +134,7 @@ function runCmdUTF8 {
 
         [Parameter(Mandatory = $true)][string]$CommandLine,
         # A linha de comando exata que será repassada para o cmd.exe /c (como uma string única).
+        # Dica: quando precisar de aspas no comando, escape-as com crase (`") dentro de strings PowerShell.
 
         [switch]$IgnoreExitCode
         # Se informado, não lançamos erro quando o comando retorna código diferente de 0.
@@ -189,6 +192,7 @@ try {
     # “Força” a remoção (caso ainda exista algum container zumbi com esses nomes).
 
     WLog "`n[PASSO 3/6] Construindo e subindo novos containers (a ignorar falhas)..."
+    # Observação: o `n acima insere quebra de linha no próprio texto logado, facilitando leitura.
     runCmdUTF8 -Title "docker-compose up -d --build" -CommandLine 'docker-compose --compatibility up -d --build' -IgnoreExitCode
     # Sobe em modo destacado (-d), reconstruindo imagens; “--compatibility” traduz limites
     # do Compose para ambientes sem Swarm.
@@ -211,9 +215,11 @@ try {
 
         $tmpFile = [System.IO.Path]::GetTempFileName()
         # Criamos um arquivo temporário para capturar a saída do “docker-compose ps”.
+        # Vantagem: evita problemas de encoding ao redirecionar direto do pipeline.
 
         runCmdUTF8 -Title "docker-compose ps" -CommandLine "docker-compose ps > `"$tmpFile`"" -IgnoreExitCode
         # Executa o ps e redireciona a saída (em UTF-8) para o arquivo temporário.
+        # As aspas foram escapadas com crase para preservar caminhos com espaços.
 
         $statuses = Get-Content -LiteralPath $tmpFile -Encoding UTF8
         # Lemos o arquivo temporário como UTF-8 e obtemos todas as linhas de status.
@@ -229,9 +235,11 @@ try {
 
             $serviceLines = $statuses | Where-Object { $_ -match "\b$([Regex]::Escape($service))\b" }
             # Filtra linhas relativas ao serviço corrente (regex seguro com Escape).
+            # Usamos \b para casar palavra inteira e evitar falsos positivos.
 
             if ($serviceLines -and ($serviceLines -match 'healthy' -or $serviceLines -match '\bUp\b')) {
                 # Se a linha falar em “healthy” (healthcheck) OU pelo menos “Up”, contamos como pronto.
+                # “Up” cobre imagens sem healthcheck explícito.
                 $healthyServices++
             }
         }
@@ -291,39 +299,48 @@ try {
         descricao = "warmup"
     } | ConvertTo-Json -Compress
     # Payload mínimo e válido para exercitar a rota POST /transacoes (crédito de 1).
+    # O -Compress evita espaços desnecessários no corpo enviado.
 
-    foreach ($id in 1..5) {
-        # Para IDs 1 a 5, chamamos o GET de extrato e o POST de transação, cobrindo leitura e escrita.
+    foreach ($round in 1..5) {
+        WLog "=== Rodada $round de aquecimento ==="
 
-        $extratoUrl   = "$baseUrl/$id/extrato"
-        $transacaoUrl = "$baseUrl/$id/transacoes"
-
-        WLog "Aquecendo ID ${id}: GET $extratoUrl"
-        try {
-            Invoke-WebRequest -Uri $extratoUrl -Method Get -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
-            # Fazemos a chamada e ignoramos erros transitórios (serviço ainda subindo).
-        } catch {
-            WLog " (Ignorando erro de aquecimento GET: $($_.Exception.Message))"
-            # Se der erro mesmo assim, registramos e seguimos (o objetivo é só “ativar” caminhos).
+        foreach ($id in 1..5) {
+            $extratoUrl = "$baseUrl/$id/extrato"
+            WLog "Aquecendo ID ${id}: GET $extratoUrl"
+            try {
+                Invoke-WebRequest -Uri $extratoUrl -Method Get -UseBasicParsing -ErrorAction SilentlyContinue | Out-Null
+                # UseBasicParsing mantém compatibilidade com PS 5; em PS 6+ é ignorado sem quebrar.
+                # -ErrorAction SilentlyContinue evita exceções “barulhentas” de falhas transitórias.
+            } catch {
+                WLog " (Ignorando erro de aquecimento GET: $($_.Exception.Message))"
+                # Capturamos e registramos a mensagem, mas seguimos o aquecimento.
+            }
         }
 
-        WLog "Aquecendo ID ${id}: POST $transacaoUrl"
-        try {
-            Invoke-WebRequest -Uri $transacaoUrl -Method Post -UseBasicParsing -ContentType "application/json" -Body $warmupPayload -ErrorAction SilentlyContinue | Out-Null
-            # Chamamos o POST com JSON leve; novamente ignoramos falhas isoladas.
-        } catch {
-            WLog " (Ignorando erro de aquecimento POST: $($_.Exception.Message))"
-            # O aquecimento não deve travar o fluxo; apenas prepara o ambiente.
+        foreach ($id in 1..5) {
+            $transacaoUrl = "$baseUrl/$id/transacoes"
+            WLog "Aquecendo ID ${id}: POST $transacaoUrl"
+            try {
+                Invoke-WebRequest -Uri $transacaoUrl -Method Post -UseBasicParsing -ContentType "application/json" -Body $warmupPayload -ErrorAction SilentlyContinue | Out-Null
+                # Postamos JSON compacto; descartamos corpo (Out-Null) para não poluir o log.
+            } catch {
+                WLog " (Ignorando erro de aquecimento POST: $($_.Exception.Message))"
+                # Erros pontuais no warm-up não devem interromper o fluxo.
+            }
         }
     }
 
     WLog "Aquecimento concluido. O banco sera limpo a seguir."
     # Aviso para separar mentalmente as fases do processo.
 
+    Start-Sleep -Seconds 4
+    # Pequena espera para garantir que o aquecimento terminou.
+
     WLog "`n[PASSO 5/6] Limpando o banco de dados..."
     runCmdUTF8 -Title "docker exec postgres psql reset" -CommandLine `
         'docker exec postgres psql -U postgres -d postgres_api_db -v ON_ERROR_STOP=1 -c "TRUNCATE TABLE transactions" -c "UPDATE accounts SET balance = 0"'
     # Zera as transações e saldos; ON_ERROR_STOP faz o psql parar no primeiro erro.
+    # Observação: as aspas duplas internas são necessárias para o psql interpretar cada -c corretamente.
 
     # ========================= BLOCO 4 — EXECUTAR O GATLING =========================
     # Por fim, rodamos a simulação de carga. Voltamos a reforçar o UTF-8 para Maven/Java
@@ -332,11 +349,13 @@ try {
     WLog "`n[PASSO 6/6] Executando o teste de carga com Gatling..."
     Push-Location "gatling"
     # Entramos na pasta do projeto Gatling (onde estão pom/arquivos de simulação).
+    # Push-Location guarda a pasta anterior para facilitar o retorno com Pop-Location.
 
     $gatlingExit = runCmdUTF8 -Title "mvnw gatling:test" -CommandLine `
         'set "JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 -Dconsole.encoding=UTF-8" & set "MAVEN_OPTS=-Dfile.encoding=UTF-8 -Dconsole.encoding=UTF-8" & set "MAVEN_OPTS=%MAVEN_OPTS% -Dmaven.compiler.encoding=UTF-8" & mvnw.cmd gatling:test -Dgatling.simulationClass=simulations.RinhaBackendCrebitosSimulation' `
         -IgnoreExitCode
     # Rodamos via mvnw.cmd (wrapper do Maven), especificando a classe de simulação.
+    # Repare que expandimos MAVEN_OPTS (+=) em vez de sobrescrever, preservando flags anteriores.
 
     Pop-Location
     # Voltamos para a pasta original para manter o ambiente consistente.

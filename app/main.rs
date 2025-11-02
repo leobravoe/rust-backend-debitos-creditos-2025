@@ -58,7 +58,7 @@ BEGIN
     SELECT json_build_object(
         'total', balance,
         'limite', account_limit,
-        'data_extrato', NOW()
+        'data_extrato', CURRENT_TIMESTAMP
     )
     INTO account_info
     FROM accounts
@@ -149,8 +149,8 @@ const Q_PROCESS_TX:  &str = "SELECT process_transaction($1, $2, $3, $4)::text";
 fn json_text(status: StatusCode, body: impl Into<Body>) -> Response {
     // Monta uma resposta HTTP com o status passado e corpo já em JSON text (String &str ou Bytes).
     Response::builder()
-        .status(status)                                       // define o código HTTP (ex.: 200 OK).
-        .header(CONTENT_TYPE, "application/json; charset=utf-8") // garante Content-Type JSON.
+        .status(status)                                        // define o código HTTP (ex.: 200 OK).
+        .header(CONTENT_TYPE, "application/json")              // garante Content-Type JSON.
         .body(body.into())                                     // coloca o corpo (já convertido em Body).
         .unwrap()                                              // unwrap é seguro aqui pois controlamos os dados.
 }
@@ -159,6 +159,11 @@ fn json_text(status: StatusCode, body: impl Into<Body>) -> Response {
 fn empty(status: StatusCode) -> Response {
     // Cria uma resposta sem corpo; útil para 404, 422 e 500 onde não vamos mandar JSON detalhado.
     Response::builder().status(status).body(Body::empty()).unwrap()
+}
+
+/* =============================== HANDLER: GET /health =================================== */
+async fn health() -> Response {
+    empty(StatusCode::OK)
 }
 
 /* ============================== HANDLER: GET /extrato ==================================
@@ -269,6 +274,7 @@ async fn main() -> anyhow::Result<()> {        // Retorna Result para poder usar
     sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?; // Instala/atualiza função process_transaction.
 
     let app = Router::new()                    // Cria o roteador principal da API.
+        .route("/health", get(health))
         .route("/clientes/{id}/extrato", get(get_extrato))            // Registra rota GET de extrato.
         .route("/clientes/{id}/transacoes", post(post_transacao))     // Registra rota POST de transações.
         .with_state(pool);                     // Anexa o pool como estado compartilhado para os handlers.
