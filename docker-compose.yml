@@ -130,14 +130,6 @@ services:                       # Raiz que agrupa todos os serviços (cada servi
     ports:                      # Mapeamento de porta do host para o Nginx.
       - "9999:9999"             # Acessar http://localhost:9999 no host envia tráfego para a porta 9999 dentro do container Nginx.
 
-    healthcheck:                # Checagem de saúde do próprio Nginx (verifica se a rota de backend responde via proxy).
-      test: [ "CMD-SHELL", "sleep 2 && curl -f http://localhost:$$PORT/clientes/1/extrato || exit 1" ]
-                                # Verifica um endpoint de backend via Nginx; se falhar, marca o Nginx como “unhealthy”.
-      interval: "5s"            # Periodicidade da verificação.
-      timeout: "5s"             # Tempo máximo por verificação.
-      retries: 60               # Quantidade de tentativas antes de considerar falha.
-      start_period: "60s"       # Janela de carência para o Nginx aquecer antes das checagens.
-
     volumes:                    # Injeta a configuração personalizada do Nginx dentro do container.
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf   # Substitui o arquivo padrão pelo seu nginx.conf (deve existir no caminho informado).
 
