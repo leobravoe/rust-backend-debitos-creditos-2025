@@ -45,7 +45,7 @@ use tokio::net::TcpListener;
      CREATE INDEX CONCURRENTLY ... (não pode estar numa transação implícita e é mais seguro para carga).
    ======================================================================================= */
 const CREATE_INDEX_SQL: &str = r#"
-CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
 "#; // Índice composto acelera "últimas transações por conta" pois filtra por account_id e ordena por id desc.
 
 /* Função get_extrato: devolve um JSON com saldo/limite/data e até 10 transações recentes.
