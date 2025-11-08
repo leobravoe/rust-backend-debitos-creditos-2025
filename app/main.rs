@@ -31,7 +31,7 @@ use axum::{
 use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use serde::Deserialize;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres}; // Postgres aqui é o "dialeto" usado pelos genéricos do SQLx.
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
@@ -39,6 +39,10 @@ use tokio::net::TcpListener;
    As constantes abaixo contêm instruções SQL que são executadas na inicialização. Isso deixa
    o banco “pronto” para o teste: cria um índice útil e duas funções PL/pgSQL (get_extrato e
    process_transaction) que encapsulam a lógica de negócio do extrato e das transações.
+
+   Observação importante para produção:
+   - Este CREATE INDEX não usa CONCURRENTLY. Em bases grandes, prefira:
+     CREATE INDEX CONCURRENTLY ... (não pode estar numa transação implícita e é mais seguro para carga).
    ======================================================================================= */
 const CREATE_INDEX_SQL: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, id DESC);
@@ -46,7 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_account_id_id_desc ON transactions (account_id, i
 
 /* Função get_extrato: devolve um JSON com saldo/limite/data e até 10 transações recentes.
    - Se a conta não existir, retorna NULL (o handler transforma isso em 404).
-   - Agrega dados em JSON dentro do próprio Postgres para minimizar trabalho no Rust. */
+   - Agrega dados em JSON dentro do próprio Postgres para minimizar trabalho no Rust.
+   - CURRENT_TIMESTAMP é avaliado no servidor e corresponde ao início da transação corrente. */
 const CREATE_EXTRACT_FUNCTION_SQL: &str = r#"
 CREATE OR REPLACE FUNCTION get_extrato(p_account_id INT)
 RETURNS JSON AS $$
@@ -88,7 +93,9 @@ $$ LANGUAGE plpgsql;
 /* Função process_transaction: tenta aplicar crédito ('c') ou débito ('d') de forma atômica.
    - O UPDATE já checa limite (para débito) e retorna saldo/limite novos.
    - O INSERT registra a transação apenas se o UPDATE ocorreu.
-   - Se nada for atualizado (id inválido ou limite estourado), devolve {"error":1}. */
+   - Se nada for atualizado (id inválido ou limite estourado), devolve {"error":1}.
+   - Em pl/pgSQL, a execução da função ocorre dentro de um comando único/atômico; a CTE
+     costura as etapas para evitar condições de corrida entre UPDATE e INSERT. */
 const CREATE_TRANSACTION_FUNCTION_SQL: &str = r#"
 CREATE OR REPLACE FUNCTION process_transaction(
     p_account_id INT,
@@ -128,7 +135,14 @@ $$ LANGUAGE plpgsql;
 
 /* ============================== MODELO DE ENTRADA (JSON) ===============================
    Define como o corpo do POST /clientes/{id}/transacoes deve chegar. O Axum + Serde vai
-   converter JSON → struct automaticamente, e depois faremos validações simples no handler. */
+   converter JSON → struct automaticamente, e depois faremos validações simples no handler.
+
+   Notas didáticas:
+   - Em JSON não existe tipo 'char'. O campo 'tipo' deve chegar como string de 1 caractere
+     (ex.: "c" ou "d"); o Serde converte para char, validando implicitamente o tamanho.
+   - .len() em String, no Rust, mede bytes UTF-8. Aqui o desafio usa ASCII; por isso o
+     critério "1..=10 bytes" coincide com "1..=10 caracteres ASCII". Para texto multibyte,
+     isso seria mais restritivo que VARCHAR(10) do Postgres (que conta caracteres). */
 #[derive(Deserialize)]
 struct TxPayload {
     valor: u32,        // inteiro sem sinal; mais adiante validamos que precisa ser > 0.
@@ -138,7 +152,11 @@ struct TxPayload {
 
 /* ============================== QUERIES DE ATALHO ======================================
    Em vez de escrever SQL completo em toda chamada, usamos constantes curtas que invocam as
-   funções do banco e pedem o resultado como texto (::text). O texto já contém JSON pronto. */
+   funções do banco e pedem o resultado como texto (::text). O texto já contém JSON pronto.
+
+   Segurança:
+   - Sempre usamos bind parameters (.bind(...)), evitando interpolação de strings e
+     prevenindo injeção de SQL. */
 const Q_GET_EXTRATO: &str = "SELECT get_extrato($1)::text";
 const Q_PROCESS_TX:  &str = "SELECT process_transaction($1, $2, $3, $4)::text";
 
@@ -160,7 +178,8 @@ fn empty(status: StatusCode) -> Response {
     Response::builder().status(status).body(Body::empty()).unwrap()
 }
 
-/* =============================== HANDLER: GET /health =================================== */
+/* ============================== HANDLER: GET /health ===================================
+   Observação: este endpoint simples é útil para health checks de orquestradores. */
 async fn health() -> Response {
     empty(StatusCode::OK)
 }
@@ -168,7 +187,11 @@ async fn health() -> Response {
 /* ============================== HANDLER: GET /extrato ==================================
    Recebe o id do cliente via Path e busca o extrato no banco. Regras:
    - Aceita apenas ids de 1 a 5 (checagem rápida com aritmética).
-   - Se o banco retornar JSON, responde 200; se NULL, responde 404; se erro de banco, 500. */
+   - Se o banco retornar JSON, responde 200; se NULL, responde 404; se erro de banco, 500.
+
+   Detalhe da checagem com wrapping_sub:
+   - O teste "uid.wrapping_sub(1) > 4" é uma forma branch-friendly de verificar 1..=5 sem
+     escrever duas comparações (id >= 1 && id <= 5). Para valores 1..=5, a expressão é falsa. */
 async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<u8>) -> Response {
     let uid = id as u32;                       // Converte para u32 para aplicar a checagem numérica barata.
     if uid.wrapping_sub(1) > 4 {               // Aceita apenas 1..=5: para esses valores a expressão é falsa.
@@ -192,7 +215,11 @@ async fn get_extrato(State(pool): State<PgPool>, Path(id): Path<u8>) -> Response
    Recebe id e um JSON com valor/tipo/descricao. Regras:
    - id deve estar entre 1 e 5 (como no extrato).
    - valor > 0; descricao 1..=10 bytes; tipo 'c' ou 'd'.
-   - Se o Postgres indicar {"error":1}, a operação é inválida → 422; senão devolve 200 com saldo/limite. */
+   - Se o Postgres indicar {"error":1}, a operação é inválida → 422; senão devolve 200 com saldo/limite.
+
+   Observação sobre validação automática do Axum:
+   - Se o JSON for malformado ou não bater com o schema de TxPayload, o extractor Json<T>
+     já responde 400 Bad Request antes mesmo de o handler rodar. */
 async fn post_transacao(
     State(pool): State<PgPool>,                // Injeta o pool de conexões no handler.
     Path(id): Path<u8>,                        // Extrai {id} da URL como u8 (suficiente para 1..=5).
@@ -233,6 +260,9 @@ async fn post_transacao(
         Ok(body) => json_text(StatusCode::OK, body), // Sucesso: retorna 200 com JSON vindo do banco.
         Err(_) => empty(StatusCode::INTERNAL_SERVER_ERROR), // Qualquer falha inesperada de banco → 500.
     }
+
+    // Nota: o teste com .contains("\"error\"") é simples e suficiente aqui pois a função
+    // process_transaction só retorna dois formatos: {"error":1} ou {"saldo":...,"limite":...}.
 }
 
 /* ============================== FUNÇÃO MAIN (INICIALIZAÇÃO) =============================
@@ -242,8 +272,14 @@ async fn post_transacao(
    3) Executa o SQL de infraestrutura (índice + funções).
    4) Registra rotas e “anexa” o pool como estado compartilhado.
    5) Abre um socket na porta informada e ativa TCP_NODELAY para reduzir pequenas latências.
-   6) Inicia o servidor Axum e fica aguardando requisições. */
-#[tokio::main]                                 // Macro que inicializa o runtime assíncrono do Tokio.
+   6) Inicia o servidor Axum e fica aguardando requisições.
+
+   Observações de operação:
+   - synchronous_commit='off' pode perder transações nos últimos milissegundos em panes; use
+     com cuidado e apenas quando a durabilidade imediata não for requisito (benchmarks).
+   - PG_MIN/PG_MAX calibram o pool; exagerar no máximo pode aumentar contenção no Postgres.
+   - 0.0.0.0 expõe o serviço na rede; para uso local, 127.0.0.1 é suficiente. */
+#[tokio::main]                                 // Macro que inicializa o runtime assíncrono do Tokio (multi-thread por padrão).
 async fn main() -> anyhow::Result<()> {        // Retorna Result para poder usar ? na inicialização.
     let db_host = std::env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string()); // Lê host do banco ou usa "localhost".
     let db_port = std::env::var("DB_PORT").unwrap_or_else(|_| "5432".to_string());      // Porta padrão do Postgres é 5432.
@@ -268,26 +304,30 @@ async fn main() -> anyhow::Result<()> {        // Retorna Result para poder usar
         .connect(&database_url)                // Abre conexões ao banco.
         .await?;                               // Espera a criação do pool (pode falhar se o banco estiver indisponível).
 
+    // Observação: estas execuções são idempotentes (CREATE OR REPLACE / IF NOT EXISTS).
+    // Em produção, é comum aplicar migrações com ferramentas (sqlx migrate, Flyway, Liquibase).
     sqlx::query(CREATE_INDEX_SQL).execute(&pool).await?;              // Garante a existência do índice (idempotente).
     sqlx::query(CREATE_EXTRACT_FUNCTION_SQL).execute(&pool).await?;   // Instala/atualiza função get_extrato.
     sqlx::query(CREATE_TRANSACTION_FUNCTION_SQL).execute(&pool).await?; // Instala/atualiza função process_transaction.
 
-    let app = Router::new()                    // Cria o roteador principal da API.
-        .route("/health", get(health))
+    let app = Router::new()                                           // Cria o roteador principal da API.
+        .route("/health", get(health))                                // Registra rota GET de health.
         .route("/clientes/{id}/extrato", get(get_extrato))            // Registra rota GET de extrato.
         .route("/clientes/{id}/transacoes", post(post_transacao))     // Registra rota POST de transações.
-        .with_state(pool);                     // Anexa o pool como estado compartilhado para os handlers.
+        .with_state(pool);                                            // Anexa o pool como estado compartilhado para os handlers.
 
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8080); // Porta configurável (padrão 8080).
-    let addr: SocketAddr = ([0, 0, 0, 0], port).into();                // 0.0.0.0 expõe para outras máquinas na rede.
+    let addr: SocketAddr = ([0, 0, 0, 0], port).into();                                      // 0.0.0.0 expõe para outras máquinas na rede.
     
-    use axum::serve::ListenerExt;             // Importa extensão para ajustar propriedades de socket no listener.
+    use axum::serve::ListenerExt;                   // Importa extensão para ajustar propriedades de socket no listener.
 
     let listener = TcpListener::bind(addr).await?   // Abre um socket TCP e fica escutando na porta escolhida.
         .tap_io(|tcp| {                             // Permite “tocar” (customizar) cada conexão aceita.
             let _ = tcp.set_nodelay(true);          // Habilita TCP_NODELAY (desativa Nagle), útil para reduzir latências de micro-mensagens.
         });
 
+    // Observação de performance: TCP_NODELAY evita coalescamento de pequenos pacotes, o que
+    // reduz latência em endpoints de respostas curtas; pode aumentar overhead em redes ruidosas.
     axum::serve(listener, app).await?;        // Inicia o servidor HTTP do Axum usando o listener e o roteador.
 
     Ok(())                                    // Final feliz da função main.
